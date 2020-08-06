@@ -1,0 +1,29 @@
+# Input/output configuration
+input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/
+project: LearnedConnections
+
+selection:
+    pt_min: 0.5
+    train_number: 1000
+    test_number: 100
+    endcaps: True
+    noise: False
+    adjacent: True
+
+model:
+    in_channels: 3
+    emb_hidden: 512
+    nb_layer: 6
+    emb_dim: 8
+
+training:
+    r_train: 1
+    r_val: 1
+    margin: 1
+    reduction: mean
+    lr: 0.001
+    weight_decay: 0.001
+    factor: 0.3
+    patience: 5
+    epochs: 20
+    

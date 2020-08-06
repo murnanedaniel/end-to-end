@@ -1,0 +1,74 @@
+program: 
+  train.py
+project:
+  EndToEnd
+method: bayes
+metric:
+  goal: maximize
+  name: combined_efficiency
+name: Toy EmbeddingToAGNN
+parameters:
+  hidden-dim:
+    distribution: q_log_normal
+    max: 5.07
+    min: 1.386
+    mu: 3.4
+    sigma: 0.8
+#   lr:
+#     distribution: log_normal
+#     max: -4.6
+#     min: -11.5
+#     mu: -6.9
+#     sigma: 1.5
+  emb-hidden:
+    min: 8
+    max: 64
+  nb-layer:
+    min: 1
+    max: 6
+  emb-dim:
+    min: 3
+    max: 16
+  r-val:
+    min: 0.3
+    max: 2.
+  r-train:
+    min: 0.3
+    max: 2.
+  margin:
+    min: 0.3
+    max: 2.
+  lr-1:
+    min: 1.
+    max: 4.
+  lr-2:
+    min: 1.
+    max: 4.
+  lr-3:
+    min: 1.
+    max: 4.    
+  n-graph-iters:
+    max: 9
+    min: 1
+  weight:
+    min: 1.
+    max: 10.
+#   hops:
+#     max: 8
+#     min: 1
+#   network:
+#     values:
+#     - Edge_Track_Truth_Net
+#   optimizer:
+#     values:
+#     - AdamW
+#   n-train:
+#     max: 980
+#     min: 100
+#   weight-decay:
+#     distribution: log_uniform
+#     max: -4.6
+#     min: -11.5
+#   real-weight:
+#       min: 0.5
+#       max: 6.0
