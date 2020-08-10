@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import scipy as sp
 import pandas as pd
 from torch_cluster import knn_graph, radius_graph
 import faiss
@@ -23,26 +24,28 @@ def train_connected_emb(model, train_loader, optimizer, m_configs):
         e_bidir = torch.cat([batch.true_edges.to(device), 
                                torch.stack([batch.true_edges[1], batch.true_edges[0]], axis=1).T.to(device)], axis=-1) 
         
-        # Get fake edge list
-        candidates = build_edges(spatial, m_configs['r_train'], 100, res)
-        e_spatial = torch.cat([candidates, e_bidir], axis=-1)        
+        # Get clustered edge list
+        e_spatial = build_edges(spatial, m_configs['r_train'], 100, res)       
+        array_size = max(e_spatial.max().item(), e_bidir.max().item()) + 1  
+            
+        l1 = e_spatial.cpu().numpy()
+        l2 = e_bidir.cpu().numpy()
+        e_1 = sp.sparse.coo_matrix((np.ones(l1.shape[1]), l1), shape=(array_size, array_size)).tocsr()
+        e_2 = sp.sparse.coo_matrix((np.ones(l2.shape[1]), l2), shape=(array_size, array_size)).tocsr()
+        e_final = (e_1.multiply(e_2) - ((e_1 - e_2)>0)).tocoo()
                 
-        reference = spatial.index_select(0, e_spatial[1])
-        neighbors = spatial.index_select(0, e_spatial[0])
-
-        d = torch.sum((reference - neighbors)**2, dim=-1)
+        e_spatial = torch.from_numpy(np.vstack([e_final.row, e_final.col])).long().to(device)
+        y_cluster = e_final.data > 0
         
-        df0 = pd.DataFrame(e_spatial.cpu().numpy().T)
-        df1 = pd.DataFrame(e_bidir.cpu().numpy().T)
-        df_merged = df0.merge(df1, how='left', indicator='Exist')
-
-        y_cluster = np.where(df_merged.Exist == 'both', 1, 0)
-        
-#         y_cluster = data.pid[e_spatial[0]] == data.pid[e_spatial[1]]
+        e_spatial = torch.cat([e_spatial, np.tile(e_bidir, m_configs['weight'])], axis=-1) 
+        y_cluster = np.concatenate([y_cluster.astype(int), np.ones(e_bidir.shape[1]*m_configs['weight'])])
         
         hinge = torch.from_numpy(y_cluster).float().to(device)
-#         hinge = y_cluster.float()
         hinge[hinge == 0] = -1
+
+        reference = spatial.index_select(0, e_spatial[1])
+        neighbors = spatial.index_select(0, e_spatial[0])
+        d = torch.sum((reference - neighbors)**2, dim=-1)
 
         loss = torch.nn.functional.hinge_embedding_loss(d, hinge, margin=m_configs["margin"], reduction=m_configs["reduction"])
         total_loss += loss.item()
@@ -64,22 +67,23 @@ def evaluate_connected_emb(model, test_loader, m_configs):
         e_spatial = build_edges(spatial, m_configs['r_val'], 100, res)  
         e_bidir = torch.cat([batch.true_edges.to(device), 
                                torch.stack([batch.true_edges[1], batch.true_edges[0]], axis=1).T.to(device)], axis=-1) 
+        array_size = max(e_spatial.max().item(), e_bidir.max().item()) + 1
         
+        l1 = e_spatial.cpu().numpy()
+        l2 = e_bidir.cpu().numpy()
+        e_1 = sp.sparse.coo_matrix((np.ones(l1.shape[1]), l1), shape=(array_size, array_size)).tocsr()
+        e_2 = sp.sparse.coo_matrix((np.ones(l2.shape[1]), l2), shape=(array_size, array_size)).tocsr()
+        e_final = (e_1.multiply(e_2) - ((e_1 - e_2)>0)).tocoo()
+                
+        e_spatial = torch.from_numpy(np.vstack([e_final.row, e_final.col])).long().to(device)
+        y_cluster = e_final.data > 0
+        
+        hinge = torch.from_numpy(y_cluster).float().to(device)
+        hinge[hinge == 0] = -1
+
         reference = spatial.index_select(0, e_spatial[1])
         neighbors = spatial.index_select(0, e_spatial[0])
         d = torch.sum((reference - neighbors)**2, dim=-1)
-        
-        df0 = pd.DataFrame(e_spatial.cpu().numpy().T)
-        df1 = pd.DataFrame(e_bidir.cpu().numpy().T)
-        df_merged = df0.merge(df1, how='left', indicator='Exist')
-
-        y_cluster = np.where(df_merged.Exist == 'both', 1, 0)
-            
-#         y_cluster = data.pid[e_spatial[0]] == data.pid[e_spatial[1]]
-    
-        hinge = torch.from_numpy(y_cluster).float().to(device)
-#         hinge = y_cluster.float()
-        hinge[hinge == 0] = -1
 
         loss = torch.nn.functional.hinge_embedding_loss(d, hinge, margin=m_configs["margin"], reduction=m_configs["reduction"])
 #         print("Loss:", loss.item())
