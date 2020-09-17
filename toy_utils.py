@@ -233,7 +233,7 @@ def save_model(epoch, model, optimizer, scheduler, running_loss, config, PATH):
                 'scheduler_state_dict': scheduler.state_dict(),
                 'loss': running_loss,
                 'config': config
-                }, os.path.join('../model_comparisons/', PATH))
+                }, os.path.join('/global/cscratch1/sd/danieltm/ExaTrkX/model_comparisons/', PATH))
 
 def save_model_from_script(epoch, model, optimizer, scheduler, running_loss, config, PATH):
     torch.save({

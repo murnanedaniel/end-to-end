@@ -7,7 +7,7 @@
 #SBATCH -G 1
 #SBATCH -o logs/%x-%j.out
 #SBATCH -A m1759
-# SBATCH -q debug
+#SBATCH -q regular
 
 # This is a generic script for submitting training jobs to Cori-GPU.
 # You need to supply the config file with this script.

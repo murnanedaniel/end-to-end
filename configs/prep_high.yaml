@@ -1,10 +1,13 @@
 # Input/output configuration
 input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml/train_all
-output_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/0.5_pt_cut_endcaps/all_events
+output_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/truth_processed/0.5_pt_cut/all_events
 n_files: 8600
+# n_files: 10
 
 selection:
     pt_min: 0.5
-    endcaps: True
+    endcaps: False
     noise: False
     adjacent: True
+    layerless: True
+    layerwise: True

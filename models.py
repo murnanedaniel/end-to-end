@@ -12,15 +12,17 @@ import torch_geometric
 import faiss
 res = faiss.StandardGpuResources()
 
-class Embedding(torch.nn.Module):
+class BatchNormEmbedding(torch.nn.Module):
     def __init__(self, in_channels, emb_hidden, nb_layer, emb_dim=3):
-        super(Embedding, self).__init__()
+        super(BatchNormEmbedding, self).__init__()
         layers = [Linear(in_channels, emb_hidden)]
         ln = [Linear(emb_hidden, emb_hidden) for _ in range(nb_layer-1)]
         layers.extend(ln)
         self.layers = nn.ModuleList(layers)
+        self.penultimate_layer = nn.Linear(emb_hidden, emb_hidden)
         self.emb_layer = nn.Linear(emb_hidden, emb_dim)
-        self.norm = torch.nn.LayerNorm(emb_hidden)
+        self.norm = nn.LayerNorm(emb_hidden)
+        self.bnorm = nn.BatchNorm1d(num_features=emb_hidden)
         self.act = nn.Tanh()
         # self.dropout = nn.Dropout(p=0.7)
 #         self.mean = torch.FloatTensor(mean).to(torch.float)
@@ -31,8 +33,10 @@ class Embedding(torch.nn.Module):
         for l in self.layers:
             x = l(x)
             x = self.act(x)
+            x = self.bnorm(x)
             # hits = self.dropout(hits)
-        x = self.norm(x) #Option of LayerNorm
+#         x = self.norm(x) #Option of LayerNorm
+        x = self.act(self.penultimate_layer(x))
         x = self.emb_layer(x)
         return x
 
@@ -44,6 +48,27 @@ class Embedding(torch.nn.Module):
             self.std  = self.std.to(device=hits.device)
             hits = (hits-self.mean) / (self.std + 10**-9)
         return hits
+    
+class Embedding(torch.nn.Module):
+    def __init__(self, in_channels, emb_hidden, nb_layer, emb_dim=3):
+        super(Embedding, self).__init__()
+        layers = [Linear(in_channels, emb_hidden)]
+        ln = [Linear(emb_hidden, emb_hidden) for _ in range(nb_layer-1)]
+        layers.extend(ln)
+        self.layers = nn.ModuleList(layers)
+        self.emb_layer = nn.Linear(emb_hidden, emb_dim)
+        self.norm = nn.LayerNorm(emb_hidden)
+        self.act = nn.Tanh()
+
+    def forward(self, x):
+#         hits = self.normalize(hits)
+        for l in self.layers:
+            x = l(x)
+            x = self.act(x)
+#         x = self.norm(x) #Option of LayerNorm
+        x = self.emb_layer(x)
+        return x
+
     
 class EdgeNetwork(nn.Module):
     """

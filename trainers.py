@@ -21,11 +21,23 @@ def train_connected_emb(model, train_loader, optimizer, m_configs):
         optimizer.zero_grad()
         data = batch.to(device)
         spatial = model(data.x)
-        e_bidir = torch.cat([batch.true_edges.to(device), 
-                               torch.stack([batch.true_edges[1], batch.true_edges[0]], axis=1).T.to(device)], axis=-1) 
         
+        # Get the truth graph
+        if m_configs['layerless']:
+            if m_configs['endcaps']:
+                e_bidir = torch.cat([batch.true_edges.to(device), 
+                                   torch.stack([batch.true_edges[1], batch.true_edges[0]], axis=1).T.to(device)], axis=-1) 
+            else:
+                e_bidir = torch.cat([batch.layerless_true_edges.to(device), 
+                                   torch.stack([batch.layerless_true_edges[1], batch.layerless_true_edges[0]], axis=1).T.to(device)], axis=-1) 
+
+        elif m_configs['layerwise']:
+            e_bidir = torch.cat([batch.layerwise_true_edges.to(device), 
+                                   torch.stack([batch.layerwise_true_edges[1], batch.layerwise_true_edges[0]], axis=1).T.to(device)], axis=-1) 
+            
+            
         # Get clustered edge list
-        e_spatial = build_edges(spatial, m_configs['r_train'], 100, res)       
+        e_spatial = build_edges(spatial, m_configs['r_train'], 200, res)       
         array_size = max(e_spatial.max().item(), e_bidir.max().item()) + 1  
             
         l1 = e_spatial.cpu().numpy()
@@ -37,7 +49,7 @@ def train_connected_emb(model, train_loader, optimizer, m_configs):
         e_spatial = torch.from_numpy(np.vstack([e_final.row, e_final.col])).long().to(device)
         y_cluster = e_final.data > 0
         
-        e_spatial = torch.cat([e_spatial, np.tile(e_bidir, m_configs['weight'])], axis=-1) 
+        e_spatial = torch.cat([e_spatial, e_bidir.transpose(0,1).repeat(1,m_configs['weight']).view(-1, 2).transpose(0,1)], axis=-1) 
         y_cluster = np.concatenate([y_cluster.astype(int), np.ones(e_bidir.shape[1]*m_configs['weight'])])
         
         hinge = torch.from_numpy(y_cluster).float().to(device)
@@ -52,7 +64,6 @@ def train_connected_emb(model, train_loader, optimizer, m_configs):
 #         print(i, loss)
         loss.backward()
         optimizer.step()
-#         print("Trained:", i)
     
     return total_loss
 
@@ -64,9 +75,21 @@ def evaluate_connected_emb(model, test_loader, m_configs):
     for i, batch in enumerate(test_loader):
         data = batch.to(device)
         spatial = model(data.x)
-        e_spatial = build_edges(spatial, m_configs['r_val'], 100, res)  
-        e_bidir = torch.cat([batch.true_edges.to(device), 
-                               torch.stack([batch.true_edges[1], batch.true_edges[0]], axis=1).T.to(device)], axis=-1) 
+        e_spatial = build_edges(spatial, m_configs['r_val'], 200, res)  
+        
+        # Get the truth graph
+        if m_configs['layerless']:
+            if m_configs['endcaps']:
+                e_bidir = torch.cat([batch.true_edges.to(device), 
+                                   torch.stack([batch.true_edges[1], batch.true_edges[0]], axis=1).T.to(device)], axis=-1) 
+            else:
+                e_bidir = torch.cat([batch.layerless_true_edges.to(device), 
+                                   torch.stack([batch.layerless_true_edges[1], batch.layerless_true_edges[0]], axis=1).T.to(device)], axis=-1) 
+
+        elif m_configs['layerwise']:
+            e_bidir = torch.cat([batch.layerwise_true_edges.to(device), 
+                                   torch.stack([batch.layerwise_true_edges[1], batch.layerwise_true_edges[0]], axis=1).T.to(device)], axis=-1) 
+            
         array_size = max(e_spatial.max().item(), e_bidir.max().item()) + 1
         
         l1 = e_spatial.cpu().numpy()
@@ -84,15 +107,15 @@ def evaluate_connected_emb(model, test_loader, m_configs):
         reference = spatial.index_select(0, e_spatial[1])
         neighbors = spatial.index_select(0, e_spatial[0])
         d = torch.sum((reference - neighbors)**2, dim=-1)
-
+    
         loss = torch.nn.functional.hinge_embedding_loss(d, hinge, margin=m_configs["margin"], reduction=m_configs["reduction"])
 #         print("Loss:", loss.item())
         total_loss += loss.item()
         
         #Cluster performance
-        cluster_true = 2*len(batch.true_edges[0])
+        cluster_true = len(e_bidir[0])
         
-        cluster_true_positive = len(df0.merge(df1))
+        cluster_true_positive = y_cluster.sum()
         cluster_positive = len(e_spatial[0])
         
         cluster_total_true_positive += cluster_true_positive
