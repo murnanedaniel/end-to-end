@@ -45,6 +45,7 @@ from performance_utils import *
 from toy_utils import *
 from models import *
 from trainers import *
+from lightning_modules.embedding_scanner import Embedding_Model
 
 # Get rid of RuntimeWarnings, gross
 import warnings
@@ -58,34 +59,34 @@ torch_seed = 0
 def process_dataset(dataset, number, save_dir, model, ratio, train=True):
     for i, batch in enumerate(dataset[:number]):
         tic = tt()
+        
         if not os.path.exists(os.path.join(save_dir, batch.event_file[-4:])):
+            data = batch.to(device)
+            spatial = model(torch.cat([data.cell_data, data.x], axis=-1))
 
-            data = batch.x.to(device)
-            spatial = model(data)
-
-            e_spatial = build_edges(spatial, 1.0, 1024, res)
+            e_spatial = build_edges(spatial, 1.4, 1024, res)
 
             # Get the truth graphs
-            e_bidir_layerless = torch.cat([batch.layerless_true_edges, 
-                                       torch.stack([batch.layerless_true_edges[1], batch.layerless_true_edges[0]], axis=1).T], axis=-1) 
+            e_bidir = torch.cat([batch.layerless_true_edges, 
+                               torch.stack([batch.layerless_true_edges[1], batch.layerless_true_edges[0]], axis=1).T], axis=-1) 
 
-            array_size = max(e_spatial.max().item(), e_bidir_layerless.max().item()) + 1
+            # Get random edge list
+            e_spatial = build_edges(spatial, 1.4, 1024, res)
 
-            l1 = e_spatial.cpu().numpy()
-            l2 = e_bidir_layerless.numpy()
-            e_1 = sp.sparse.coo_matrix((np.ones(l1.shape[1]), l1), shape=(array_size, array_size)).tocsr()
-            e_2 = sp.sparse.coo_matrix((np.ones(l2.shape[1]), l2), shape=(array_size, array_size)).tocsr()
-            e_final = (e_1.multiply(e_2) - ((e_1 - e_2)>0)).tocoo()
+            # Remove duplicate edges by distance from vertex
+            R_dist = torch.sqrt(batch.x[:,0]**2 + batch.x[:,2]**2)
+            e_spatial = e_spatial[:, (R_dist[e_spatial[0]] < R_dist[e_spatial[1]])]
 
-            e_spatial = torch.from_numpy(np.vstack([e_final.row, e_final.col])).long()
+            e_spatial, y = graph_intersection(e_spatial, e_bidir)  
 
-            y = e_final.data > 0
+            # Re-introduce random direction, to avoid training bias
+            random_flip = torch.randint(2, (e_spatial.shape[1],)).bool()
+            e_spatial[0, random_flip], e_spatial[1, random_flip] = e_spatial[1, random_flip], e_spatial[0, random_flip]
 
-            batch.x = batch.x.cpu()
             batch.embedding = spatial.cpu().detach()
-            
+
             if train and (ratio != 0): # Sample only ratio:1 fake:true edges, to keep trainset manageable
-                
+
                 num_true = y.sum()
                 fake_indices = choice(np.where(~y)[0], int(num_true*ratio), replace=True)
                 true_indices = np.where(y)[0]
@@ -94,23 +95,26 @@ def process_dataset(dataset, number, save_dir, model, ratio, train=True):
 
                 batch.e_radius = e_spatial[:,combined_indices].cpu()
                 batch.y = torch.from_numpy(y[combined_indices]).float()
-                
+
             else:
                 batch.e_radius = e_spatial.cpu()
                 batch.y = torch.from_numpy(y).float()
-                
+
 
             with open(os.path.join(save_dir, batch.event_file[-4:]), 'wb') as pickle_file:
                 torch.save(batch, pickle_file)
     
-        print(i, "saved in time", tt()-tic, "with efficiency", (batch.y.sum()/e_bidir_layerless.shape[1]).item(), "and purity", (batch.y.sum()/batch.e_radius.shape[1]).item())
+            print(i, "saved in time", tt()-tic, "with efficiency", (batch.y.sum()/batch.layerless_true_edges.shape[1]).item(), "and purity", (batch.y.sum()/batch.e_radius.shape[1]).item())
+        
+        else:
+            print(i, "already built")
     
 
 def main():
     """Main function"""
 
     # Load raw events
-    pt_cut = 0.5
+    pt_cut = 0
     embedding_train_number = 1000
     embedding_test_number = 100
     load_dir = "/global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/truth_processed/"
@@ -123,38 +127,38 @@ def main():
     print("Raw events loaded")
     
     # Load embedding model
-    checkpoint = torch.load('model_comparisons/Embedding/smooth-snowball-99.tar')
-    
-    m_configs = {"in_channels": 3, "emb_hidden": 512, "nb_layer": 6, "emb_dim": 64}
-    other_configs = {"r_train": 1, "r_val": 1, "margin": 1, 'reduction':'mean', 'weight': 8, 
-                     'layerwise': False, 'layerless': True, 'endcaps': False}
-    model = Embedding(**m_configs).to(device)
+    run_label = "qy6e0oi9"
 
-    m_configs.update(other_configs)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    best_run_path = get_best_run(run_label, wandb_save_dir="/global/cscratch1/sd/danieltm/ExaTrkX/wandb_data")
+
+    model = Embedding_Model.load_from_checkpoint(best_run_path)
+    model = model.to(device)
 
     print("Embedding model loaded")
 
     # Process filter candidates
-    
     ratio = 0
     filter_train_number = 1000
     filter_test_number = 100
     
     save_dir = "/global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/filter_processed/"
-    train_dir = os.path.join(save_dir, str(pt_cut) + "_pt_cut", str(filter_train_number) + "_events_train")
-    test_dir = os.path.join(save_dir, str(pt_cut) + "_pt_cut", str(filter_test_number) + "_events_test")
+    train_dir = os.path.join(save_dir, str(pt_cut) + "_pt_cut", str(filter_train_number) + "_events_train_cell_info")
+    test_dir = os.path.join(save_dir, str(pt_cut) + "_pt_cut", str(filter_test_number) + "_events_test_cell_info")
     os.makedirs(train_dir, exist_ok=True)
     os.makedirs(test_dir, exist_ok=True)
     
     print("Directory structure set up")
     
     # Process testset
-    process_dataset(test_dataset, filter_test_number, test_dir, model, ratio, train=False)
+    model.eval()
+    with torch.no_grad():
+        process_dataset(test_dataset, filter_test_number, test_dir, model, ratio, train=False)
     print("Testset processed")
 
     # Process trainset (n.b. train is set to true, to only sample the neighbourhoods)
-    process_dataset(train_dataset, filter_train_number, train_dir, model, ratio, train=True)
+    model.eval()
+    with torch.no_grad():
+        process_dataset(train_dataset, filter_train_number, train_dir, model, ratio, train=True)
     print("Trainset processed")
     
     

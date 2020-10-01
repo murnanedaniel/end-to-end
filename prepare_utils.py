@@ -48,6 +48,17 @@ def calc_eta(r, z):
     theta = np.arctan2(r, z)
     return -1. * np.log(np.tan(theta / 2.))
 
+def get_best_run(run_label, wandb_save_dir):
+    for (root_dir, dirs, files) in os.walk(wandb_save_dir + "/wandb"):
+        if run_label in dirs:
+            run_root= root_dir
+        
+    best_run_base = os.path.join(run_root, run_label, "checkpoints")
+    best_run = os.listdir(best_run_base)
+    best_run_path = os.path.join(best_run_base, best_run[0])
+
+    return best_run_path
+    
 def build_event(event_file, pt_min, feature_scale, adjacent=True, endcaps=False, noise=False):
     hits, particles, truth = trackml.dataset.load_event(
         event_file, parts=['hits', 'particles', 'truth'])

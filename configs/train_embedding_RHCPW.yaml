@@ -1,32 +1,38 @@
 # Input/output configuration
 input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/truth_processed/
-project: LearnedConnections
+project: EmbeddingStudy
 
 selection:
-    pt_min: 0.5
+    pt_min: 0
     train_number: 1000
     test_number: 100
     endcaps: False
     layerwise: False
     layerless: True
     noise: False
-    adjacent: True
+    adjacent: False
 
-model:
-    in_channels: 3
+hparams:
+    in_channels: 12
     emb_hidden: 512
     nb_layer: 6
-    emb_dim: 64
-
-training:
+    emb_dim: 8
+    weight: 4
+    randomisation: 2
     r_train: 1
-    r_val: 1
+    r_val: 0.5
+    knn: 20
+    warmup: 500
     margin: 1
-    reduction: mean
-    lr: 0.001
-    weight_decay: 0.001
+    lr: 0.002
     factor: 0.3
     patience: 5
-    epochs: 30
-    weight: 4
+    regime:
+        - rp
+        - hnm
+        - ci
+    max_epochs: 100
+    wandb_save_dir: /global/cscratch1/sd/danieltm/ExaTrkX/wandb_data
+    
+    
     

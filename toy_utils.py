@@ -274,6 +274,20 @@ def remove_duplicate_edges(X, e):
     e = np.vstack([e_sparse.row, e_sparse.col])
     
     return e
+
+def graph_intersection(pred_graph, truth_graph):
+    array_size = max(pred_graph.max().item(), truth_graph.max().item()) + 1  
+    
+    l1 = pred_graph.cpu().numpy()
+    l2 = truth_graph.cpu().numpy()
+    e_1 = sp.sparse.coo_matrix((np.ones(l1.shape[1]), l1), shape=(array_size, array_size)).tocsr()
+    e_2 = sp.sparse.coo_matrix((np.ones(l2.shape[1]), l2), shape=(array_size, array_size)).tocsr()
+    e_intersection = (e_1.multiply(e_2) - ((e_1 - e_2)>0)).tocoo()
+
+    new_pred_graph = torch.from_numpy(np.vstack([e_intersection.row, e_intersection.col])).long().to(device)
+    y = e_intersection.data > 0
+    
+    return new_pred_graph, y
     
 def make_mlp(input_size, sizes,
              hidden_activation=nn.ReLU,

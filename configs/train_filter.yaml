@@ -1,0 +1,33 @@
+# Input/output configuration
+input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml_processed/filter_processed/
+project: FilteringStudy
+
+selection:
+    pt_min: 0
+    train_number: 1000
+    test_number: 100
+    endcaps: False
+    layerwise: False
+    layerless: True
+    noise: False
+    adjacent: False
+
+hparams:
+    in_channels: 3
+    hidden: 512
+    nb_layer: 3
+    emb_channels: 0
+    weight: 4
+    ratio: 1
+    warmup: 100
+    lr: 0.002
+    factor: 0.3
+    patience: 5
+    regime:
+        - non_ci
+#         - ci
+    max_epochs: 100
+    wandb_save_dir: /global/cscratch1/sd/danieltm/ExaTrkX/wandb_data
+    
+    
+    
