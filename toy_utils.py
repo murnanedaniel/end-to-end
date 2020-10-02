@@ -290,10 +290,13 @@ def graph_intersection(pred_graph, truth_graph):
     return new_pred_graph, y
     
 def make_mlp(input_size, sizes,
-             hidden_activation=nn.ReLU,
-             output_activation=nn.ReLU,
+             hidden_activation='ReLU',
+             output_activation='ReLU',
              layer_norm=False):
     """Construct an MLP with specified fully-connected layers."""
+    hidden_activation = getattr(nn, hidden_activation)
+    if output_activation is not None:
+        output_activation = getattr(nn, output_activation)
     layers = []
     n_layers = len(sizes)
     sizes = [input_size] + sizes

@@ -5,8 +5,8 @@ model: Filter_Model
 
 selection:
     pt_min: 0
-    train_number: 100
-    test_number: 10
+    train_number: 1000
+    test_number: 100
     endcaps: False
     layerwise: False
     layerless: True
@@ -14,23 +14,23 @@ selection:
     adjacent: False
 
 hparams:
-    in_channels: 12
-    hidden: 512
+    in_channels: 3
+    hidden: 32
     nb_layer: 3
-    emb_channels: 0
-    layernorm: True
-    batchnorm: True
+    n_graph_iters: 6
+    layer_norm: True
+    hidden_activation: Tanh
     weight: 8
-    ratio: 8
-    val_subset: 0.1
+#     ratio: 8
+#     val_subset: 0.1
     warmup: 100
     lr: 0.002
     factor: 0.3
     patience: 5
     regime:
-#         - non_ci
-        - ci
-#         - pid
+        - non_ci
+#         - ci
+        - pid
     max_epochs: 100
     wandb_save_dir: /global/cscratch1/sd/danieltm/test_20200930/wandb_data
     
