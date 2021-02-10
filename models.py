@@ -12,6 +12,71 @@ import torch_geometric
 import faiss
 res = faiss.StandardGpuResources()
 
+class CheckMPNN_Network(nn.Module):
+    """
+    A message-passing graph network which takes a graph with:
+    - bi-directional edges
+    - node features, no edge features
+
+    and applies the following modules:
+    - a graph encoder (no message passing)
+    - recurrent edge and node networks
+    - an edge classifier
+    """
+
+    def __init__(self, input_dim, hidden_node_dim, hidden_edge_dim, in_layers, node_layers, edge_layers,
+                 n_graph_iters=1, layer_norm=True):
+        super(CheckMPNN_Network, self).__init__()
+        self.n_graph_iters = n_graph_iters
+
+        # The node encoder transforms input node features to the hidden space
+        self.node_encoder = make_mlp(input_dim, [hidden_node_dim]*in_layers)
+
+        # The edge network computes new edge features from connected nodes
+        self.edge_network = make_mlp(2*hidden_node_dim,
+                                     [hidden_edge_dim]*edge_layers,
+                                     layer_norm=layer_norm)
+
+        # The node network computes new node features
+        self.node_network = make_mlp(hidden_node_dim + hidden_edge_dim,
+                                     [hidden_node_dim]*node_layers,
+                                     layer_norm=layer_norm)
+
+        # The edge classifier computes final edge scores
+        self.edge_classifier = make_mlp(2*hidden_node_dim,
+                                        [hidden_edge_dim, 1],
+                                        output_activation=None)
+
+    def forward(self, x, edge_index):
+
+        # Encode the graph features into the hidden space
+        x = self.node_encoder(x)
+
+        # Loop over graph iterations
+        for i in range(self.n_graph_iters):
+
+            # Previous hidden state
+            x0 = x
+
+            # Compute new edge features
+            edge_inputs = torch.cat([x[edge_index[0]], x[edge_index[1]]], dim=1)
+            e = checkpoint(self.edge_network, edge_inputs)
+
+            # Sum edge features coming into each node
+            aggr_messages = scatter_add(e, edge_index[1], dim=0, dim_size=x.shape[0])
+
+            # Compute new node features
+            node_inputs = torch.cat([x, aggr_messages], dim=1)
+            x = checkpoint(self.node_network, node_inputs)
+
+            # Residual connection
+            x = x + x0
+
+        # Compute final edge scores; use original edge directions only
+        start_idx, end_idx = edge_index
+        clf_inputs = torch.cat([x[start_idx], x[end_idx]], dim=1)
+        return checkpoint(self.edge_classifier, clf_inputs).squeeze(-1)
+
 class BatchNormEmbedding(torch.nn.Module):
     def __init__(self, in_channels, emb_hidden, nb_layer, emb_dim=3):
         super(BatchNormEmbedding, self).__init__()

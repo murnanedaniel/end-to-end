@@ -1,0 +1,52 @@
+# Input/output configuration
+input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml-codalab/feature_store_endcaps_SMALLTEST
+output_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml-codalab/embedding_processed/1_pt_cut_endcaps_unweighted
+project: CodaEmbeddingStudy
+overwrite: True
+
+# Dataset parameters
+pt_min: 1
+train_split: [100, 20, 20] # Number of [training, validation, testing] examples
+endcaps: True
+layerwise: False
+layerless: True
+noise: False
+adjacent: False
+
+# Model parameters
+in_channels: 3
+space_channels: 32
+hidden_channels: 64
+output_channels: 32
+
+encoding_layers: 3
+decoding_layers: 3
+num_iterations: 6
+
+hidden_r: 1
+hidden_knn: 40
+exp_coeff: 2
+
+hidden_activation: ReLU
+layernorm: True
+
+# Training parameters
+weight: 1
+randomisation: 2
+r_train: 1
+r_val: 1
+r_test: 1
+knn: 40
+warmup: 500
+margin: 1
+lr: 0.001
+factor: 0.3
+patience: 8
+regime: [rp, hnm]
+max_epochs: 10
+
+# Postprocessing
+callbacks: EmbeddingTelemetry #[EmbeddingInferenceCallback, 
+
+# Logging
+wandb_save_dir: /global/cscratch1/sd/danieltm/ExaTrkX/wandb_data
