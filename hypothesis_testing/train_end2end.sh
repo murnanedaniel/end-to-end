@@ -3,7 +3,7 @@
 #SBATCH -J train-end2end
 #SBATCH -N 1
 #SBATCH -C gpu
-#SBATCH -t 1:00:00
+#SBATCH -t 4:00:00
 #SBATCH -G 1
 #SBATCH -o logs/%x-%j.out
 #SBATCH -A m1759
@@ -15,5 +15,6 @@
 # Setup
 conda activate exatrkx-test
 
+
 # Single GPU training
-srun -u python batch_train.py
+srun -u python batch_train_jet.py

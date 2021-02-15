@@ -19,6 +19,8 @@ class GNNBase(LightningModule):
         '''
         Initialise the Lightning Module that can scan over different GNN training regimes
         '''
+        self.save_hyperparameters()
+        
         # Assign hyperparameters
         self.hparams = hparams
         self.hparams["posted_alert"] = False

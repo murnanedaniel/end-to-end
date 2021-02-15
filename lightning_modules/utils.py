@@ -11,15 +11,16 @@ import scipy as sp
 import numpy as np
 import pandas as pd
 import trackml.dataset
+import random
 
 from scipy.optimize import root_scalar as root
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class MultiNoiseLoss(nn.Module):
-    def __init__(self, n_losses):
+    def __init__(self, n_losses, device):
         super(MultiNoiseLoss, self).__init__()
-        self.noise_params = torch.rand(n_losses, requires_grad=True, device="cuda:0")
+        self.noise_params = torch.rand(n_losses, requires_grad=True, device=device)
     
     def forward(self, losses):
         
@@ -33,6 +34,7 @@ def load_dataset(input_dir, num, pt_cut):
     if input_dir is not None:
         all_events = os.listdir(input_dir)
         all_events = sorted([os.path.join(input_dir, event) for event in all_events])
+        random.shuffle(all_events)
         loaded_events = []
         for event in all_events[:num]:
             try:
@@ -46,15 +48,17 @@ def load_dataset(input_dir, num, pt_cut):
     else:
         return None
     
-def load_processed_dataset(input_dir, num):
+def load_processed_dataset(input_dir, num, min_edges=None):
     if input_dir is not None:
         all_events = os.listdir(input_dir)
         all_events = sorted([os.path.join(input_dir, event) for event in all_events])
+        random.shuffle(all_events)
         loaded_events = []
         for event in all_events[:num]:
             try:
                 loaded_event = torch.load(event, map_location=torch.device('cpu'))
-                loaded_events.append(loaded_event)
+                if (min_edges is None) or (loaded_event.sub_edge_index.sum() > min_edges):
+                    loaded_events.append(loaded_event)
 #                 logging.info('Loaded event: {}'.format(loaded_event.event_file))
             except:
                 logging.info('Corrupted event file: {}'.format(event))
@@ -267,7 +271,7 @@ def make_mlp(input_size, sizes,
 def embedding_model_evaluation(model, trainer, fom= "eff", fixed_value=0.96):
         
     # Seed solver with one batch, then run on full test dataset
-    sol = root(evaluate_set_root, args=(model, trainer, fixed_value, fom), x0=0.9, x1=1.2, xtol=0.001)
+    sol = root(evaluate_set_root, args=(model, trainer, fixed_value, fom), x0=0.6, x1=1., xtol=0.001)
     print("Seed solver complete, radius:", sol.root)
     
     # Return ( (efficiency, purity), radius_size)

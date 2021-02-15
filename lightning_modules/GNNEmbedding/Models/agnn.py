@@ -13,6 +13,7 @@ from torch.utils.checkpoint import checkpoint
 
 from ..gnn_base import GNNNodeEmbeddingBase, GNNEdgeEmbeddingBase
 from ..toy_base import ToyGNNNodeEmbeddingBase
+from ..jet_base import JetGNNNodeEmbeddingBase
 from ...utils import make_mlp
 
 class EdgeNetwork(nn.Module):
@@ -72,7 +73,7 @@ class NodeMeanNetwork(nn.Module):
     def __init__(self, input_dim, output_dim, nb_layers, hidden_activation='Tanh',
                  layer_norm=True):
         super(NodeMeanNetwork, self).__init__()
-        self.network = make_mlp(input_dim*2, [output_dim]*nb_layers,
+        self.network = make_mlp(input_dim*3, [output_dim]*nb_layers,
                                 hidden_activation=hidden_activation,
                                 output_activation=None,
                                 layer_norm=layer_norm)
@@ -84,7 +85,7 @@ class NodeMeanNetwork(nn.Module):
         combined_message = messages_in + x
 #         combined_message = torch.cat([messages_in, x], dim=1)
         node_mean = torch.mean(combined_message, dim=0)
-        node_inputs = torch.cat([combined_message, node_mean.repeat((combined_message.shape[0], 1))], dim=-1)
+        node_inputs = torch.cat([messages_in, x, node_mean.repeat((combined_message.shape[0], 1))], dim=-1)
         return self.network(node_inputs)
     
        
@@ -144,7 +145,64 @@ class AttentionNodeEmbedding(ToyGNNNodeEmbeddingBase):
             
         return x, e
     
-class GlobalAttentionNodeEmbedding(GNNNodeEmbeddingBase):
+class LocalAttentionNodeEmbedding(JetGNNNodeEmbeddingBase):
+
+    def __init__(self, hparams):
+        super().__init__(hparams)
+        '''
+        Initialise the Lightning Module that can scan over different GNN training regimes
+        '''
+
+        # Setup input network
+        self.input_network = make_mlp(hparams["in_channels"], [hparams["hidden"]]*hparams["nb_edge_layer"],
+                                      output_activation=hparams["hidden_activation"],
+                                      layer_norm=hparams["layernorm"])
+        
+        # Setup the edge network
+        self.edge_network = EdgeNetwork(hparams["hidden"], hparams["in_channels"] + hparams["hidden"],
+                                        hparams["nb_edge_layer"], hparams["hidden_activation"], hparams["layernorm"])
+        
+        # Setup the node layers
+        self.node_network = NodeNetwork(hparams["hidden"], hparams["hidden"],
+                                        hparams["nb_node_layer"], hparams["hidden_activation"], hparams["layernorm"])
+
+        # Setup embedding network
+        self.embedding_network = make_mlp(hparams["hidden"], [hparams["hidden"]]*hparams["nb_emb_layer"]+[hparams["emb_dim"]],
+                                      output_activation=None,
+                                      layer_norm=False)
+        
+    def forward(self, x, edge_index):
+                
+        input_x = x
+
+        x = self.input_network(x)
+
+        # Shortcut connect the inputs onto the hidden representation
+#         x = torch.cat([x, input_x], dim=-1)
+
+        e = torch.ones(edge_index.shape[1], device=self.device)
+
+        # Loop over iterations of edge and node networks
+        for i in range(self.hparams["n_graph_iters"]):
+            x_inital = x
+
+            # Apply edge network
+            e = self.edge_network(x, edge_index)
+
+            # Apply node network
+            x = self.node_network(x, torch.sigmoid(e), edge_index)
+
+            # Shortcut connect the inputs onto the hidden representation
+#             x = torch.cat([x, input_x], dim=-1)
+
+            # Residual connection
+            x = x_inital + x
+            
+        x = self.embedding_network(x)
+            
+        return x, e
+    
+class MeanAttentionNodeEmbedding(JetGNNNodeEmbeddingBase):
 
     def __init__(self, hparams):
         super().__init__(hparams)
@@ -179,6 +237,8 @@ class GlobalAttentionNodeEmbedding(GNNNodeEmbeddingBase):
         # Shortcut connect the inputs onto the hidden representation
 #         x = torch.cat([x, input_x], dim=-1)
 
+        e = torch.ones(edge_index.shape[1], device=self.device)
+
         # Loop over iterations of edge and node networks
         for i in range(self.hparams["n_graph_iters"]):
             x_inital = x
@@ -197,6 +257,192 @@ class GlobalAttentionNodeEmbedding(GNNNodeEmbeddingBase):
             
         x = self.embedding_network(x)
             
+        return x, e
+
+    
+class GlobalAttentionNodeEmbedding(JetGNNNodeEmbeddingBase):
+
+    def __init__(self, hparams):
+        super().__init__(hparams)
+        '''
+        Initialise the Lightning Module that can scan over different GNN training regimes
+        '''
+
+        # Setup input network
+        self.input_network = make_mlp(hparams["in_channels"], [hparams["hidden"]]*hparams["nb_edge_layer"],
+                                      output_activation=hparams["hidden_activation"],
+                                      layer_norm=hparams["layernorm"])
+        
+        # Setup the edge network
+        self.edge_network = EdgeNetwork(hparams["in_channels"] + hparams["hidden"], hparams["hidden"],
+                                        hparams["nb_edge_layer"], hparams["hidden_activation"], hparams["layernorm"])
+        
+        # Setup the node layers
+        self.node_network = NodeNetwork(hparams["in_channels"] + hparams["hidden"], hparams["hidden"],
+                                        hparams["nb_node_layer"], hparams["hidden_activation"], hparams["layernorm"])
+
+        # Setup embedding network
+        self.embedding_network = make_mlp(hparams["hidden"]+hparams["in_channels"], [4*hparams["hidden"]]*hparams["nb_emb_layer"]+[hparams["emb_dim"]],
+                                      output_activation=None,
+                                      layer_norm=False)
+        
+    def forward(self, x, edge_index):
+                
+        input_x = x
+
+        x = self.input_network(x)
+
+        # Shortcut connect the inputs onto the hidden representation
+        x = torch.cat([x, input_x], dim=-1)
+
+        e = torch.ones(edge_index.shape[1], device=self.device)
+
+        # Loop over iterations of edge and node networks
+        for i in range(self.hparams["n_graph_iters"]):
+            x_inital = x
+
+            # Apply edge network
+            e = self.edge_network(x, edge_index)
+
+            # Apply node network
+            x = self.node_network(x, torch.sigmoid(e), edge_index)
+
+            # Shortcut connect the inputs onto the hidden representation
+            x = torch.cat([x, input_x], dim=-1)
+            
+            # Residual connection
+            x = x_inital + x           
+        
+        # Shortcut connect the inputs onto the hidden representation
+#         x = torch.cat([x, input_x], dim=-1)
+        x = self.embedding_network(x)
+            
+        return x, e
+    
+class ConcatAttentionNodeEmbedding(JetGNNNodeEmbeddingBase):
+
+    def __init__(self, hparams):
+        super().__init__(hparams)
+        '''
+        Initialise the Lightning Module that can scan over different GNN training regimes
+        '''
+
+        # Setup input network
+        self.input_network = make_mlp(hparams["in_channels"], [hparams["hidden"]]*hparams["nb_edge_layer"],
+                                      output_activation=hparams["hidden_activation"],
+                                      layer_norm=hparams["layernorm"])
+        
+        # Setup the edge network
+        self.edge_network = EdgeNetwork(hparams["hidden"], hparams["in_channels"] + hparams["hidden"],
+                                        hparams["nb_edge_layer"], hparams["hidden_activation"], hparams["layernorm"])
+        
+        # Setup the node layers
+        self.node_network = NodeNetwork(hparams["hidden"], hparams["hidden"],
+                                        hparams["nb_node_layer"], hparams["hidden_activation"], hparams["layernorm"])
+
+        # Setup embedding network
+        self.embedding_network_1 = make_mlp(hparams["hidden"], [hparams["hidden"]]*hparams["nb_emb_layer"]+[hparams["emb_dim"]],
+                                      output_activation=None,
+                                      layer_norm=False)
+        self.embedding_network_2 = make_mlp(hparams["in_channels"], [4*hparams["hidden"]]*hparams["nb_emb_layer"]+[hparams["emb_dim"]],
+                                      output_activation=None,
+                                      layer_norm=False)
+        
+    def forward(self, x, edge_index):
+                
+        input_x = x
+
+        x = self.input_network(x)
+
+        # Shortcut connect the inputs onto the hidden representation
+#         x = torch.cat([x, input_x], dim=-1)
+
+        e = torch.ones(edge_index.shape[1], device=self.device)
+
+        # Loop over iterations of edge and node networks
+        for i in range(self.hparams["n_graph_iters"]):
+            x_inital = x
+
+            # Apply edge network
+            e = self.edge_network(x, edge_index)
+
+            # Apply node network
+            x = self.node_network(x, torch.sigmoid(e), edge_index)
+
+            # Shortcut connect the inputs onto the hidden representation
+#             x = torch.cat([x, input_x], dim=-1)
+
+            # Residual connection
+            x = x_inital + x
+        
+        # Shortcut connect the inputs onto the hidden representation
+        x = torch.cat([self.embedding_network_1(x), self.embedding_network_2(input_x)], dim=-1)
+        
+        return x, e
+    
+class ConcatPlusAttentionNodeEmbedding(JetGNNNodeEmbeddingBase):
+
+    def __init__(self, hparams):
+        super().__init__(hparams)
+        '''
+        Initialise the Lightning Module that can scan over different GNN training regimes
+        '''
+
+        # Setup input network
+        self.input_network = make_mlp(hparams["in_channels"], [hparams["hidden"]]*hparams["nb_edge_layer"],
+                                      output_activation=hparams["hidden_activation"],
+                                      layer_norm=hparams["layernorm"])
+        
+        # Setup the edge network
+        self.edge_network = EdgeNetwork(hparams["hidden"], hparams["in_channels"] + hparams["hidden"],
+                                        hparams["nb_edge_layer"], hparams["hidden_activation"], hparams["layernorm"])
+        
+        # Setup the node layers
+        self.node_network = NodeNetwork(hparams["hidden"], hparams["hidden"],
+                                        hparams["nb_node_layer"], hparams["hidden_activation"], hparams["layernorm"])
+
+        # Setup embedding network
+        self.embedding_network_1 = make_mlp(hparams["hidden"], [hparams["hidden"]]*2,
+                                      output_activation=None,
+                                      layer_norm=False)
+        self.embedding_network_2 = make_mlp(hparams["in_channels"], [4*hparams["hidden"]]*2,
+                                      output_activation=None,
+                                      layer_norm=False)
+        self.embedding_network_3 = make_mlp(5*hparams["hidden"], [5*hparams["hidden"]]*2+[hparams["emb_dim"]],
+                                      output_activation=None,
+                                      layer_norm=False)
+        
+    def forward(self, x, edge_index):
+                
+        input_x = x
+
+        x = self.input_network(x)
+
+        # Shortcut connect the inputs onto the hidden representation
+#         x = torch.cat([x, input_x], dim=-1)
+
+        e = torch.ones(edge_index.shape[1], device=self.device)
+
+        # Loop over iterations of edge and node networks
+        for i in range(self.hparams["n_graph_iters"]):
+            x_inital = x
+
+            # Apply edge network
+            e = self.edge_network(x, edge_index)
+
+            # Apply node network
+            x = self.node_network(x, torch.sigmoid(e), edge_index)
+
+            # Shortcut connect the inputs onto the hidden representation
+#             x = torch.cat([x, input_x], dim=-1)
+
+            # Residual connection
+            x = x_inital + x
+        
+        # Shortcut connect the inputs onto the hidden representation
+        x = torch.cat([self.embedding_network_1(x), self.embedding_network_2(input_x)], dim=-1)
+        x = self.embedding_network_3(x)
+        
         return x, e
     
     

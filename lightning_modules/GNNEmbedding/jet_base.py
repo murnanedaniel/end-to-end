@@ -117,15 +117,12 @@ class ToyGNNEmbeddingBase(LightningModule):
             
         return hit_features
         
-    def get_classification_loss(self, batch, doublet_score):
+    def get_classification_loss(self, batch, doublet_score, edge_inputs):
         
-        subgraph_indices = self.get_subgraph(batch)
-        subgraph = batch.edge_index[:, subgraph_indices]
+        y = batch.pid[edge_inputs[0]] == batch.pid[edge_inputs[1]]
+        filter_loss = F.binary_cross_entropy_with_logits(doublet_score.squeeze(), y.float(), pos_weight = torch.tensor(self.hparams["weight"]))
         
-        y = batch.pid[subgraph[0]] == batch.pid[subgraph[1]]
-        filter_loss = F.binary_cross_entropy_with_logits(doublet_score.squeeze()[subgraph_indices], y.float(), pos_weight = torch.tensor(self.hparams["weight"]))
-        
-        edge_prediction = (torch.sigmoid(doublet_score) > self.hparams["edge_cut"]).squeeze()[subgraph_indices]
+        edge_prediction = (torch.sigmoid(doublet_score) > self.hparams["edge_cut"]).squeeze()
         
         return filter_loss, y, edge_prediction
     
@@ -136,16 +133,18 @@ class ToyGNNEmbeddingBase(LightningModule):
         
         node_features = self.get_input_features(batch)
         
-        latent_features, doublet_score = self(node_features, batch.edge_index)     
+        edge_inputs = self.get_subgraph(batch)
+        
+        latent_features, doublet_score = self(node_features, edge_inputs)     
         
         if self.hparams["edge_loss_only"]:
-            classification_loss, _, _ = self.get_classification_loss(batch, doublet_score)
+            classification_loss, _, _ = self.get_classification_loss(batch, doublet_score, edge_inputs)
             loss = classification_loss
         elif self.hparams["emb_loss_only"]:
             emb_loss = self.get_embedding_training_loss(batch, latent_features)
             loss = emb_loss
         else:
-            classification_loss, _, _ = self.get_classification_loss(batch, doublet_score)
+            classification_loss, _, _ = self.get_classification_loss(batch, doublet_score, edge_inputs)
             emb_loss = self.get_embedding_training_loss(batch, latent_features)
             self.log_dict({"emb_loss": emb_loss, "classification_loss": classification_loss})
             
@@ -161,12 +160,13 @@ class ToyGNNEmbeddingBase(LightningModule):
     def shared_evaluation(self, batch, batch_idx, knn_radius, knn_num, log=False):
         
         node_features = self.get_input_features(batch)
+        edge_inputs = self.get_subgraph(batch)
             
-        latent_features, doublet_score = self(node_features, batch.edge_index)
+        latent_features, doublet_score = self(node_features, edge_inputs)
                
-        emb_loss, truth_graph, y = self.get_embedding_val_loss(batch, latent_features)
+        emb_loss, truth_graph, y = self.get_embedding_val_loss(batch, latent_features, knn_radius, knn_num)
         
-        classification_loss, filter_truth_graph, edge_prediction = self.get_classification_loss(batch, doublet_score)
+        classification_loss, filter_truth_graph, edge_prediction = self.get_classification_loss(batch, doublet_score, edge_inputs)
         
         if self.hparams["edge_loss_only"]:
             loss = classification_loss
@@ -254,13 +254,13 @@ class ToyGNNEmbeddingBase(LightningModule):
     
     def validation_step(self, batch, batch_idx):
         
-        outputs = self.shared_evaluation(batch, batch_idx, self.hparams["r_val"], 100, log=True)
+        outputs = self.shared_evaluation(batch, batch_idx, self.hparams["r_val"], 200, log=True)
             
         return outputs["loss"]
     
     def test_step(self, batch, batch_idx):
 
-        outputs = self.shared_evaluation(batch, batch_idx, self.hparams["r_test"], 300, log=False)
+        outputs = self.shared_evaluation(batch, batch_idx, self.hparams["r_test"], 500, log=False)
         
         return outputs
     
@@ -278,7 +278,7 @@ class ToyGNNEmbeddingBase(LightningModule):
 
 
         
-class ToyGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
+class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
         
         
     def __init__(self, hparams):
@@ -288,12 +288,16 @@ class ToyGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
     def get_subgraph(self, batch):
                 
         if "subgraph" in self.hparams["regime"]: # and batch.sub_edge_index.sum() > 1000:
-            subgraph_indices = batch.sub_edge_index
+            subgraph = batch.sub_edge_index
+            
+            if "random_edges" in self.hparams["regime"]:
+                random_edges = self.get_random_edges(subgraph, subgraph)
+                subgraph = torch.cat([subgraph, random_edges], axis=-1)
             
         else:
-            subgraph_indices = torch.randperm(batch.edge_index.shape[1])[:self.hparams["n_edges"]]
+            subgraph = torch.randperm(batch.edge_index.shape[1])[:self.hparams["n_edges"]]
     
-        return subgraph_indices
+        return subgraph
     
     def get_random_edges(self, truth_graph, subgraph):
         
@@ -307,25 +311,31 @@ class ToyGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
     def get_embedding_training_loss(self, batch, latent_space):
         
         # Construct training examples or KNN validation
-        subgraph_indices = self.get_subgraph(batch)
+        subgraph = self.get_subgraph(batch)
         
-        subgraph = batch.edge_index[:, subgraph_indices]
         truth_graph = batch.pid_true_edges[:, np.isin(batch.pid_true_edges.cpu(), subgraph.cpu()).all(0)]
         
-        doublet_edges = torch.empty([2,0], dtype=torch.int64, device=self.device)      
+        if "all_pairs" in batch.__dict__.keys() and ("global_train" not in self.hparams["regime"]):
+            doublet_edges = torch.cat([batch.all_pairs, batch.all_pairs.flip(0)], axis=-1)
         
-        # Append random edges pairs (rp) for stability
-        random_edges = self.get_random_edges(truth_graph, subgraph)
-        doublet_edges = torch.cat([doublet_edges, random_edges], axis=-1)       
-        
-        # Append Hard Negative Mining (hnm) with KNN graph
-        unique_hits = torch.unique(subgraph)
-        knn_edges = build_edges(latent_space[unique_hits], self.hparams["r_train"], self.hparams["knn"])
-        knn_edges = unique_hits[knn_edges]
-        doublet_edges = torch.cat([doublet_edges, knn_edges], axis=-1)
-        
-        # Append truth
-        doublet_edges = torch.cat([doublet_edges, truth_graph], axis=-1)
+        else:
+            doublet_edges = torch.empty([2,0], dtype=torch.int64, device=self.device)      
+
+            # Append random edges pairs (rp) for stability
+            random_edges = self.get_random_edges(truth_graph, subgraph)
+            doublet_edges = torch.cat([doublet_edges, random_edges], axis=-1)       
+
+            # Append Hard Negative Mining (hnm) with KNN graph
+            unique_hits = torch.unique(subgraph)
+            knn_edges = build_edges(latent_space[unique_hits], self.hparams["r_train"], self.hparams["knn"])
+            knn_edges = unique_hits[knn_edges]
+            doublet_edges = torch.cat([doublet_edges, knn_edges], axis=-1)
+
+            # Maybe remove this??
+#             doublet_edges = torch.cat([doublet_edges, batch.all_pairs, batch.all_pairs.flip(0)], axis=-1)
+            
+            # Append truth
+            doublet_edges = torch.cat([doublet_edges, truth_graph], axis=-1)
         
         # Get distance metric
         reference = latent_space.index_select(0, doublet_edges[1])
@@ -346,22 +356,29 @@ class ToyGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
         
         return emb_loss
     
-    def get_embedding_val_loss(self, batch, latent_space):
+    def get_embedding_val_loss(self, batch, latent_space, k_radius, knn):
     
         # Construct training examples or KNN validation
-        subgraph_indices = self.get_subgraph(batch)
+        subgraph = self.get_subgraph(batch)
         
-        subgraph = batch.edge_index[:, subgraph_indices]
         truth_graph = batch.pid_true_edges[:, np.isin(batch.pid_true_edges.cpu(), subgraph.cpu()).all(0)]
         
-        # Get neighbourhoods within subgraph
-        unique_hits = torch.unique(subgraph)
-        knn_edges = build_edges(latent_space[unique_hits], self.hparams["r_val"], 200)
-        doublet_edges = unique_hits[knn_edges]
+        if "all_pairs" in batch.__dict__.keys() and ("global_inference" not in self.hparams["regime"]):
+            doublet_edges = torch.cat([batch.all_pairs, batch.all_pairs.flip(0)], axis=-1)
+        
+        else:
+            # Get neighbourhoods within subgraph
+            unique_hits = torch.unique(subgraph)
+            knn_edges = build_edges(latent_space[unique_hits], k_radius, knn)
+            doublet_edges = unique_hits[knn_edges]
         
         reference = latent_space.index_select(0, doublet_edges[1])
         neighbors = latent_space.index_select(0, doublet_edges[0])
         d = torch.sum((reference - neighbors)**2, dim=-1)
+        
+        in_radius_edges = d < k_radius**2
+        d = d[in_radius_edges]
+        doublet_edges = doublet_edges[:, in_radius_edges]        
                          
         y = batch.pid[doublet_edges[0]] == batch.pid[doublet_edges[1]]       
                     

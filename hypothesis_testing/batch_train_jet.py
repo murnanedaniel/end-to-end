@@ -20,7 +20,9 @@ sys.path.append('..')
 
 # Local imports
 from lightning_modules.GNNEmbedding.Models.interaction_gnn import InteractionEdgeEmbedding, GlobalInteractionNodeEmbedding
-from lightning_modules.GNNEmbedding.Models.agnn import GlobalAttentionNodeEmbedding
+from lightning_modules.GNNEmbedding.Models.agnn import GlobalAttentionNodeEmbedding, ConcatAttentionNodeEmbedding, ConcatPlusAttentionNodeEmbedding
+from lightning_modules.GNNEmbedding.Models.agnn import AttentionNodeEmbedding
+from lightning_modules.GNNEmbedding.Models.agnn import LocalAttentionNodeEmbedding
 from lightning_modules.GNN.Models.agnn import ResAGNN
 from lightning_modules.Filter.Models.vanilla_filter import VanillaFilter
 from pytorch_lightning.loggers import WandbLogger
@@ -30,13 +32,14 @@ logging.basicConfig(level=logging.INFO)
 
 def main():
     
-    with open("../lightning_modules/GNN/train_coda_gnn.yaml") as f:
-            hparams = yaml.load(f, Loader=yaml.FullLoader)
+    with open("../lightning_modules/GNNEmbedding/train_jet_gnn.yaml") as f:
+        hparams = yaml.load(f, Loader=yaml.FullLoader)
 
-    model = ResAGNN(hparams)
-    wandb_logger = WandbLogger(project='End2End-AGNN')
+    model = LocalAttentionNodeEmbedding(hparams)
+    model.hparams["model_type"] = type(model)
+    wandb_logger = WandbLogger(project='End2End-JetNodeEmbedding')
     wandb_logger.watch(model)
-    trainer = Trainer(gpus=1, max_epochs=hparams["max_epochs"], logger=wandb_logger, accumulate_grad_batches=1)
+    trainer = Trainer(gpus=1, max_epochs=hparams["max_epochs"], logger=wandb_logger, num_sanity_val_steps=0, accumulate_grad_batches=1)
     
     trainer.fit(model)
     

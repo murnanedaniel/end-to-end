@@ -12,7 +12,7 @@ import torch
 from ..utils import load_processed_dataset
 
 def calc_eta(r, z):
-    theta = torch.atan(r, z)
+    theta = torch.atan(r/z)
     return -1. * torch.log(torch.tan(theta / 2.))
 
 class GNNBase(LightningModule):
@@ -80,20 +80,25 @@ class GNNBase(LightningModule):
                         
         if "hnm" in self.hparams["regime"]:
             
-             bidir_edges = self.find_hard_negatives(bidir_edges, batch)
+            bidir_edges = self.find_hard_negatives(bidir_edges, batch)
+        
+        if "subgraph" in self.hparams["regime"] and batch.sub_edge_index.sum() > 1000:
             
-        if "eta_slice" in self.hparams:
+            subgraph_indices = batch.sub_edge_index
+            
+        elif "eta_slice" in self.hparams["regime"]:
             
             eta = calc_eta(batch.x[:, 0], batch.x[:, 2])
             eta_av = (eta[bidir_edges[0]] + eta[bidir_edges[1]]) / 2
             bidir_edges = bidir_edges[:, eta_av.argsort()]
             
-            rand_index = torch.randint(0, bidir_edges.shape[1])
-            bidir_edges = bidir_edges[:, rand_index:(rand_index + self.hparams["n_edges"])]
+            rand_index = torch.randint(bidir_edges.shape[1] - self.hparams["n_edges"], (1,)).item()
+            subgraph_indices = torch.arange(rand_index, (rand_index + self.hparams["n_edges"]))
+#             bidir_edges = bidir_edges[:, rand_index:(rand_index + self.hparams["n_edges"])]
             
         elif 'n_edges' in self.hparams:
             
-            bidir_edges = bidir_edges[:, torch.randperm(bidir_edges.shape[1])[:self.hparams["n_edges"]]]
+            subgraph_indices = torch.randperm(bidir_edges.shape[1])[:self.hparams["n_edges"]]
         
         if "balanced" in self.hparams["regime"]:
             
@@ -107,16 +112,18 @@ class GNNBase(LightningModule):
             # Shuffle indices:
             bidir_edges = bidir_edges[:, combined_indices[torch.randperm(len(combined_indices))]]
     
-        return bidir_edges
+        return bidir_edges, subgraph_indices
     
     def training_step(self, batch, batch_idx):
        
-        input_edges = self.random_sample(batch)
+        input_edges, loss_indices = self.random_sample(batch)
             
         output = self(batch.x, input_edges).squeeze()
-
-        y_pid = (batch.pid[input_edges[0]] == batch.pid[input_edges[1]]).float()
-        loss = F.binary_cross_entropy_with_logits(output, y_pid.float(), pos_weight = torch.tensor(self.hparams["weight"]))
+#         print(output.shape)
+        
+        y_pid = (batch.pid[input_edges[0, loss_indices]] == batch.pid[input_edges[1, loss_indices]]).float()
+#         print(y_pid.shape)
+        loss = F.binary_cross_entropy_with_logits(output[loss_indices], y_pid.float(), pos_weight = torch.tensor(self.hparams["weight"]))
             
         self.log('train_loss', loss)
 

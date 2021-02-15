@@ -1,5 +1,5 @@
 # Input/output configuration
-input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml-codalab/embedding_processed/1_pt_cut_endcaps_unweighted
+input_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml-codalab/embedding_processed/toy_datasets/case_A4
 output_dir: /global/cscratch1/sd/danieltm/ExaTrkX/trackml-codalab/gnn_processed/0_pt_cut_endcaps_weighted
 project: CodaGNNStudy
 edge_cut: 0.5
@@ -29,8 +29,8 @@ warmup: 300
 lr: 0.001
 factor: 0.3
 patience: 40
-regime: [pid, eta_slice]
-max_epochs: 90
+regime: [pid, subgraph, eta_slice]
+max_epochs: 100
 slack_alert: False
 n_edges: 2900
 
