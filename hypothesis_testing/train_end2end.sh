@@ -3,11 +3,11 @@
 #SBATCH -J train-end2end
 #SBATCH -N 1
 #SBATCH -C gpu
-#SBATCH -t 4:00:00
+#SBATCH -t 7:00:00
 #SBATCH -G 1
 #SBATCH -o logs/%x-%j.out
 #SBATCH -A m1759
-#SBATCH -q regular
+#SBATCH -q special
 
 # This is a generic script for submitting training jobs to Cori-GPU.
 # You need to supply the config file with this script.

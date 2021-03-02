@@ -13,7 +13,7 @@ import torch
 from torch_geometric.data import DataLoader
 
 # Local imports
-from ..utils import graph_intersection
+from ...utils import make_mlp
 
 class LayerlessEmbedding(AugmentedEmbeddingBase):
 
@@ -24,23 +24,16 @@ class LayerlessEmbedding(AugmentedEmbeddingBase):
         '''
 
         # Construct the MLP architecture
-        layers = [Linear(hparams["in_channels"], hparams["emb_hidden"])]
-        ln = [Linear(hparams["emb_hidden"], hparams["emb_hidden"]) for _ in range(hparams["nb_layer"]-1)]
-        layers.extend(ln)
-        self.layers = nn.ModuleList(layers)
-        self.emb_layer = nn.Linear(hparams["emb_hidden"], hparams["emb_dim"])
-#         self.layernorm = nn.LayerNorm(hparams["emb_hidden"])
-#         self.batchnorm = nn.BatchNorm1d(hparams["emb_hidden"])
-        self.act = nn.Tanh()
+        self.emb_network = make_mlp(hparams["in_channels"], [hparams["emb_hidden"]]*hparams["nb_layer"] + [hparams["emb_dim"]],
+                                      hidden_activation="Tanh",
+                                      layer_norm=False)
+        
         self.save_hyperparameters()
 
     def forward(self, x):
-#         hits = self.normalize(hits)
-        for l in self.layers:
-            x = l(x)
-            x = self.act(x)
-#             x = self.layernorm(x) #Option of LayerNorm
-#             x = self.batchnorm(x) #Option of BatchNorm
-        x = self.emb_layer(x)
+#         
+        x = self.emb_network(x)
+    
         return x
+
 

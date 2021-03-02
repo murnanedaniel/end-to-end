@@ -8,7 +8,7 @@ overwrite: True
 # Dataset parameters
 pt_min: 1
 datatype_names: [train, val, test] # Which directory prefixes to use, assuming at least a train dataset 
-datatype_split: [100, 20, 20] # Number of [training, validation, testing] examples
+datatype_split: [200, 20, 20] # Number of [training, validation, testing] examples
 endcaps: True
 layerwise: False
 layerless: True
@@ -17,21 +17,21 @@ adjacent: False
 
 # Model parameters
 in_channels: 3
-emb_hidden: 64
+emb_hidden: 256
 nb_layer: 4
 emb_dim: 8
-weight: 2
+weight: 1
 randomisation: 2
 r_train: 1
 r_val: 1
 r_test: 1
-knn: 50
+knn: 2
 warmup: 500
 margin: 1
-lr: 0.002
+lr: 0.0005
 factor: 0.3
 patience: 15
-regime: [rp, hnm, pid]
+regime: [rp, hnm]
 max_epochs: 10
 
 # Postprocessing

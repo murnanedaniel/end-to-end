@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA
 import numpy as np
 from itertools import combinations
 import matplotlib.pyplot as plt
+import scipy.sparse as sp
 
 from IPython import display
 
@@ -200,57 +201,6 @@ class ToyGNNEmbeddingBase(LightningModule):
         
         
         return {"loss": loss, "truth": y.cpu().numpy(), "truth_graph": truth_graph.cpu().numpy(), "edge_eff": edge_eff, "edge_pur": edge_pur}
-
-    def plot_example(self):
-        
-        batch = self.valset[0].to(self.device)
-        node_features = self.get_input_features(batch)
-            
-        latent_features, doublet_score = self(node_features, batch.edge_index)
-        classification_loss, filter_truth_graph, edge_prediction = self.get_classification_loss(batch, doublet_score)
-        
-        all_pairs = self.get_all_pairs(batch).cpu()
-        y = batch.pid[all_pairs[0]] == batch.pid[all_pairs[1]]
-        
-                
-        
-        
-        pca = PCA(n_components=2)
-        graph_hits = latent_features[torch.unique(batch.edge_index)].detach().cpu()
-        pca.fit(graph_hits)
-        reduced_dimensions = pca.transform(graph_hits)
-        all_hits_reduced = pca.transform(latent_features.detach().cpu())
-#         print(reduced_dimensions.shape)
-        display.clear_output(wait=True)
-    
-        plt.plot(reduced_dimensions[:, 0], reduced_dimensions[:, 1], marker="o", markerfacecolor='black', ls="")
-        
-        
-#         plt.plot(all_hits_reduced[batch.edge_index[:, input_y].cpu(), 0], all_hits_reduced[batch.edge_index[:, input_y].cpu(), 1], "b-")
-#         plt.plot(all_hits_reduced[batch.edge_index[:, ~input_y].cpu(), 0], all_hits_reduced[batch.edge_index[:, ~input_y].cpu(), 1], "r-", alpha=0.2)
-        
-        plt.plot(all_hits_reduced[batch.edge_index[:, filter_truth_graph & edge_prediction].cpu(), 0], all_hits_reduced[batch.edge_index[:, filter_truth_graph & edge_prediction].cpu(), 1], "k-")
-        plt.plot(all_hits_reduced[batch.edge_index[:, ~filter_truth_graph & ~edge_prediction].cpu(), 0], all_hits_reduced[batch.edge_index[:, ~filter_truth_graph & ~edge_prediction].cpu(), 1], "k:")
-        plt.plot(all_hits_reduced[batch.edge_index[:, ~filter_truth_graph & edge_prediction].cpu(), 0], all_hits_reduced[batch.edge_index[:, ~filter_truth_graph & edge_prediction].cpu(), 1], "r-")
-        plt.plot(all_hits_reduced[batch.edge_index[:, filter_truth_graph & ~edge_prediction].cpu(), 0], all_hits_reduced[batch.edge_index[:, filter_truth_graph & ~edge_prediction].cpu(), 1], "b-")
-        
-#         plt.plot(all_hits_reduced[all_pairs[:, y], 0], all_hits_reduced[all_pairs[:, y], 1], "b-")
-#         plt.plot(all_hits_reduced[all_pairs[:, ~y], 0], all_hits_reduced[all_pairs[:, ~y], 1], "r-", alpha=0.2)
-
-#         graph_hits = batch.x[torch.unique(batch.edge_index)].detach().cpu()
-#         plt.plot(graph_hits[:, 0], graph_hits[:, 1], marker="o", markerfacecolor='black', ls="")
-#         plt.plot(batch.x[batch.edge_index[:, input_y], 0].cpu(), batch.x[batch.edge_index[:, input_y], 1].cpu(), "k-")
-#         plt.plot(batch.x[batch.edge_index[:, ~input_y], 0].cpu(), batch.x[batch.edge_index[:, ~input_y], 1].cpu(), "m-", alpha=0.2)
-
-        plt.plot(batch.x[batch.edge_index[:, filter_truth_graph & edge_prediction], 0].cpu(), batch.x[batch.edge_index[:, filter_truth_graph & edge_prediction], 1].cpu(), "k-")
-        plt.plot(batch.x[batch.edge_index[:, ~filter_truth_graph & ~edge_prediction], 0].cpu(), batch.x[batch.edge_index[:, ~filter_truth_graph & ~edge_prediction], 1].cpu(), "k:")
-        plt.plot(batch.x[batch.edge_index[:, ~filter_truth_graph & edge_prediction], 0].cpu(), batch.x[batch.edge_index[:, ~filter_truth_graph & edge_prediction], 1].cpu(), "r-")
-        plt.plot(batch.x[batch.edge_index[:, filter_truth_graph & ~edge_prediction], 0].cpu(), batch.x[batch.edge_index[:, filter_truth_graph & ~edge_prediction], 1].cpu(), "b-")
-
-        plt.pause(0.0001)
-        
-        batch = self.valset[0].to("cpu")
-        
     
     def validation_step(self, batch, batch_idx):
         
@@ -288,7 +238,11 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
     def get_subgraph(self, batch):
                 
         if "subgraph" in self.hparams["regime"]: # and batch.sub_edge_index.sum() > 1000:
-            subgraph = batch.sub_edge_index
+            
+            if batch.sub_edge_index[0].dtype == "bool":
+                subgraph = batch.edge_index[:, batch.sub_edge_index[0]]
+            else:        
+                subgraph = batch.sub_edge_index
             
             if "random_edges" in self.hparams["regime"]:
                 random_edges = self.get_random_edges(subgraph, subgraph)
@@ -308,6 +262,21 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
     
         return random_edges
     
+    def get_connected_pairs(self, subgraph, walk_length=None):
+        
+        if walk_length is None:
+            walk_length = self.hparams["n_graph_iters"]
+        
+        graph_np = subgraph.cpu().numpy()
+        graph_coo = sp.coo_matrix((np.ones(graph_np.shape[1]), (graph_np[0], graph_np[1])), [graph_np.max()+1,graph_np.max()+1])
+        graph_csr = graph_coo.tocsr() + graph_coo.tocsr().T
+        walked_graph = graph_csr**(walk_length-1)
+        walked_graph = graph_csr*walked_graph + walked_graph
+        connected_pairs = torch.from_numpy(np.vstack(walked_graph.nonzero())).long().to(self.device)
+        connected_pairs = connected_pairs[:, connected_pairs[0] != connected_pairs[1]]
+        
+        return connected_pairs
+    
     def get_embedding_training_loss(self, batch, latent_space):
         
         # Construct training examples or KNN validation
@@ -321,6 +290,9 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
         else:
             doublet_edges = torch.empty([2,0], dtype=torch.int64, device=self.device)      
 
+            # Append pairs within an n_graph_iter-walk radius
+            doublet_edges = torch.cat([doublet_edges, self.get_connected_pairs(subgraph)], axis=-1)
+            
             # Append random edges pairs (rp) for stability
             random_edges = self.get_random_edges(truth_graph, subgraph)
             doublet_edges = torch.cat([doublet_edges, random_edges], axis=-1)       
@@ -356,10 +328,43 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
         
         return emb_loss
     
+    def get_local_performance(self, subgraph, batch, latent_space, k_radius, walk_length):
+        
+        walk_edges = self.get_connected_pairs(subgraph, walk_length=walk_length)
+        reference = latent_space.index_select(0, walk_edges[1])
+        neighbors = latent_space.index_select(0, walk_edges[0])
+        d = torch.sum((reference - neighbors)**2, dim=-1)
+        
+        in_radius_edges = d < k_radius**2
+        d = d[in_radius_edges]
+        walk_edges = walk_edges[:, in_radius_edges]        
+                         
+        walk_y = batch.pid[walk_edges[0]] == batch.pid[walk_edges[1]]   
+        walk_truth = batch.pid_true_edges[:, np.isin(batch.pid_true_edges.cpu(), walk_edges.cpu()).all(0)]
+        
+        walk_cluster_true = walk_truth.shape[1]
+        walk_cluster_true_positive = walk_y.sum()
+        walk_cluster_positive = len(walk_y)
+                
+        walk_eff = walk_cluster_true_positive / max(walk_cluster_true, 1)
+        walk_pur = walk_cluster_true_positive / max(walk_cluster_positive, 1)
+        
+        return walk_eff, walk_pur
+    
     def get_embedding_val_loss(self, batch, latent_space, k_radius, knn):
     
         # Construct training examples or KNN validation
         subgraph = self.get_subgraph(batch)
+        
+        # DEBUGGING: What is the performance when only considering the local neighbourhood?
+        
+        step_4_eff, step_4_pur = self.get_local_performance(subgraph, batch, latent_space, k_radius, walk_length=4)
+        self.log_dict({'step_4_eff': step_4_eff, 'step_4_pur': step_4_pur})       
+        
+        step_8_eff, step_8_pur = self.get_local_performance(subgraph, batch, latent_space, k_radius, walk_length=8)
+        self.log_dict({'step_8_eff': step_8_eff, 'step_8_pur': step_8_pur})         
+        
+        # REGULAR EVALUATION:
         
         truth_graph = batch.pid_true_edges[:, np.isin(batch.pid_true_edges.cpu(), subgraph.cpu()).all(0)]
         
@@ -386,7 +391,7 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
         hinge[hinge == 0] = -1
         
         emb_loss = torch.nn.functional.hinge_embedding_loss(d, hinge, margin=self.hparams["margin"], reduction="mean")
-        
+                
         return emb_loss, truth_graph, y
         
         

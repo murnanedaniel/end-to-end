@@ -35,10 +35,10 @@ def main():
     with open("../lightning_modules/GNNEmbedding/train_jet_gnn.yaml") as f:
         hparams = yaml.load(f, Loader=yaml.FullLoader)
 
-    model = LocalAttentionNodeEmbedding(hparams)
-    model.hparams["model_type"] = type(model)
-    wandb_logger = WandbLogger(project='End2End-JetNodeEmbedding')
+    model = ConcatPlusAttentionNodeEmbedding(hparams)
+    wandb_logger = WandbLogger(project='End2End-ConnectedJetNodeEmbedding')
     wandb_logger.watch(model)
+    wandb_logger.log_hyperparams({"model": type(model)})
     trainer = Trainer(gpus=1, max_epochs=hparams["max_epochs"], logger=wandb_logger, num_sanity_val_steps=0, accumulate_grad_batches=1)
     
     trainer.fit(model)

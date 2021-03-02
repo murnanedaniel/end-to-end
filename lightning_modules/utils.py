@@ -4,6 +4,7 @@ from memory_profiler import profile
 
 import faiss
 import faiss.contrib.torch_utils
+from pytorch3d import ops
 import torch
 import torch.nn as nn
 from torch.utils.data import random_split
@@ -188,16 +189,31 @@ def graph_intersection(pred_graph, truth_graph, using_weights=False, weights_bid
     else:
         return new_pred_graph, y
 
-def build_edges(spatial, r_max, k_max, return_indices=False):
+def build_edges(spatial, r_max, k_max, return_indices=False, target_spatial=None):
     
-    if device == "cuda":
-        res = faiss.StandardGpuResources()
-        D, I = faiss.knn_gpu(res, spatial, spatial, k_max)
-    elif device == "cpu":
-        index = faiss.IndexFlatL2(spatial.shape[1])
-        index.add(spatial)
-        D, I = index.search(spatial, k_max)
+    if k_max > 200:
+        if device == "cuda":
+            res = faiss.StandardGpuResources()
+            if target_spatial is None:
+                D, I = faiss.knn_gpu(res, spatial, spatial, k_max)
+            else:
+                D, I = faiss.knn_gpu(res, spatial, target_spatial, k_max)
+        elif device == "cpu":
+            index = faiss.IndexFlatL2(spatial.shape[1])
+            index.add(spatial)
+            if target_spatial is None:
+                D, I = index.search(spatial, k_max)
+            else:
+                D, I = index.search(target_spatial, k_max)
 
+    else:
+        if target_spatial is None:
+            knn_object = ops.knn_points(spatial.unsqueeze(0), spatial.unsqueeze(0), K=k_max, return_sorted=False)
+        else:
+            knn_object = ops.knn_points(spatial.unsqueeze(0), target_spatial.unsqueeze(0), K=k_max, return_sorted=False)
+        I = knn_object.idx[0]
+        D = knn_object.dists[0]
+        
     # Overlay the "source" hit ID onto each neighbour ID (this is necessary as the FAISS algo does some shortcuts)
     ind = torch.Tensor.repeat(torch.arange(I.shape[0], device=device), (I.shape[1], 1), 1).T
     edge_list = torch.stack([ind[D <= r_max**2], I[D <= r_max**2]])
