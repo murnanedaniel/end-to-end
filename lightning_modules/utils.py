@@ -156,6 +156,15 @@ def reset_edge_id(subset, graph):
     
     return graph, exist_edges
 
+def push_all_negs_back(a):
+    # Based on http://stackoverflow.com/a/42859463/3293881
+    valid_mask = a!=-1
+    flipped_mask = valid_mask.sum(1,keepdims=1) > np.arange(a.shape[1]-1,-1,-1)
+    flipped_mask = flipped_mask[:,::-1]
+    a[flipped_mask] = a[valid_mask]
+    a[~flipped_mask] = -1
+    return a
+
 def graph_intersection(pred_graph, truth_graph, using_weights=False, weights_bidir=None):
 
     array_size = max(pred_graph.max().item(), truth_graph.max().item()) + 1
