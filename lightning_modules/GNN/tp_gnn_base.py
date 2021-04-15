@@ -102,7 +102,7 @@ class GNNBase(LightningModule):
             else torch.tensor((~batch.y_pid.bool()).sum() / batch.y_pid.sum())
         )
 
-        output = (
+        edge_output, node_output = (
             self(
                 torch.cat([batch.cell_data, batch.x], axis=-1), batch.edge_index
             ).squeeze()
@@ -116,9 +116,16 @@ class GNNBase(LightningModule):
             if "pid" in self.hparams["regime"]
             else batch.y
         )
+        
+        node_truth = batch.pt
+        
 
-        loss = F.binary_cross_entropy_with_logits(output, edge_truth, pos_weight=weight)
+        edge_loss = F.binary_cross_entropy_with_logits(output, edge_truth, pos_weight=weight)
+        
+        node_loss = F.mse_loss(node_output, node_truth)
 
+        loss = edge_loss + node_loss
+        
         self.log("train_loss", loss)
 
         return loss
