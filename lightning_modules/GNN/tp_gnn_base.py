@@ -12,20 +12,33 @@ import torch
 from ..utils import load_processed_dataset
 
 
-def calc_eta(r, z):
-    theta = torch.atan(r / z)
-    return -1.0 * torch.log(torch.tan(theta / 2.0))
-
-
 class GNNBase(LightningModule):
+    
+    """
+    The base class for a combined edge classification AND track parameter regression GNN model. 
+
+    This class abstracts out the training and validation behaviour of edge classification + track parameter regression GNNs. Note: It is specific to edge classification + track parameter regression.
+    
+    Todo:
+        * Rewrite edge classification to include track parameter regression loss function
+        * Handle truth for unpooled edges
+        * Calculate truth pT for a pooled node
+
+    """
+
     def __init__(self, hparams):
         super().__init__()
         """
         Initialise the Lightning Module that can scan over different GNN training regimes
+        
+        Args:
+            hparams (dict): The hyperparameter dictionary, preferably loaded from a yaml config file. Can also be loaded from a saved lightning checkpoint.
+            
         """
+        self.save_hyperparameters()
+
         # Assign hyperparameters
         self.hparams = hparams
-        self.hparams["posted_alert"] = False
 
     def setup(self, stage):
         if stage == "fit":
@@ -68,14 +81,6 @@ class GNNBase(LightningModule):
                 amsgrad=True,
             )
         ]
-        #         scheduler = [
-        #             {
-        #                 'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer[0], factor=self.hparams["factor"], patience=self.hparams["patience"]),
-        #                 'monitor': 'val_loss',
-        #                 'interval': 'epoch',
-        #                 'frequency': 1
-        #             }
-        #         ]
         scheduler = [
             {
                 "scheduler": torch.optim.lr_scheduler.StepLR(
@@ -89,79 +94,30 @@ class GNNBase(LightningModule):
         ]
         return optimizer, scheduler
 
-    def random_sample(self, batch):
-
-        if "bidirectional" in self.hparams:
-            bidir_edges = torch.cat(
-                [batch.edge_index, batch.edge_index.flip(0)], axis=-1
-            )
-
-        else:
-            bidir_edges = batch.edge_index
-
-        if "hnm" in self.hparams["regime"]:
-
-            bidir_edges = self.find_hard_negatives(bidir_edges, batch)
-
-        if "subgraph" in self.hparams["regime"] and batch.sub_edge_index.sum() > 1000:
-
-            subgraph_indices = batch.sub_edge_index
-
-        elif "eta_slice" in self.hparams["regime"]:
-
-            eta = calc_eta(batch.x[:, 0], batch.x[:, 2])
-            eta_av = (eta[bidir_edges[0]] + eta[bidir_edges[1]]) / 2
-            bidir_edges = bidir_edges[:, eta_av.argsort()]
-
-            rand_index = torch.randint(
-                bidir_edges.shape[1] - self.hparams["n_edges"], (1,)
-            ).item()
-            subgraph_indices = torch.arange(
-                rand_index, (rand_index + self.hparams["n_edges"])
-            )
-        #             bidir_edges = bidir_edges[:, rand_index:(rand_index + self.hparams["n_edges"])]
-
-        elif "n_edges" in self.hparams:
-
-            subgraph_indices = torch.randperm(bidir_edges.shape[1])[
-                : self.hparams["n_edges"]
-            ]
-
-        if "balanced" in self.hparams["regime"]:
-
-            y = batch.pid[bidir_edges[0]] == batch.pid[bidir_edges[1]]
-
-            num_true, num_false = y.bool().sum(), (~y.bool()).sum()
-            fake_indices = torch.where(~y.bool())[0][
-                torch.randperm(num_false)[:num_true]
-            ]
-            true_indices = torch.where(y.bool())[0]
-            combined_indices = torch.cat([true_indices, fake_indices])
-
-            # Shuffle indices:
-            bidir_edges = bidir_edges[
-                :, combined_indices[torch.randperm(len(combined_indices))]
-            ]
-
-        return bidir_edges, subgraph_indices
-
     def training_step(self, batch, batch_idx):
 
-        input_edges, loss_indices = self.random_sample(batch)
-
-        output = self(batch.x, input_edges).squeeze()
-        #         print(output.shape)
-
-        y_pid = (
-            batch.pid[input_edges[0, loss_indices]]
-            == batch.pid[input_edges[1, loss_indices]]
-        ).float()
-        #         print(y_pid.shape)
-        loss = F.binary_cross_entropy_with_logits(
-            output[loss_indices],
-            y_pid.float(),
-            pos_weight=torch.tensor(self.hparams["weight"]),
+        weight = (
+            torch.tensor(self.hparams["weight"])
+            if ("weight" in self.hparams)
+            else torch.tensor((~batch.y_pid.bool()).sum() / batch.y_pid.sum())
         )
+
+        output = (
+            self(
+                torch.cat([batch.cell_data, batch.x], axis=-1), batch.edge_index
+            ).squeeze()
+            if ("ci" in self.hparams["regime"])
+            else self(batch.x, batch.edge_index).squeeze()
+        )
+        
+        # Fix this!
+        edge_truth = (
+            (batch.pid[batch.edge_index[0]] == batch.pid[batch.edge_index[1]]).float()
+            if "pid" in self.hparams["regime"]
+            else batch.y
+        )
+
+        loss = F.binary_cross_entropy_with_logits(output, edge_truth, pos_weight=weight)
 
         self.log("train_loss", loss)
 
@@ -182,19 +138,14 @@ class GNNBase(LightningModule):
             if ("ci" in self.hparams["regime"])
             else self(batch.x, batch.edge_index).squeeze()
         )
-
+        
+        # Fix this!
         truth = (
             (batch.pid[batch.edge_index[0]] == batch.pid[batch.edge_index[1]]).float()
             if "pid" in self.hparams["regime"]
             else batch.y
         )
 
-        if "weighting" in self.hparams["regime"]:
-            manual_weights = batch.weights
-        else:
-            manual_weights = None
-
-        #         loss = F.binary_cross_entropy_with_logits(output, truth.float(), weight = manual_weights, pos_weight = weight)
         loss = F.binary_cross_entropy_with_logits(output, truth.float())
 
         # Edge filter performance
@@ -204,21 +155,15 @@ class GNNBase(LightningModule):
         edge_true = truth.sum().float()
         edge_true_positive = (truth.bool() & preds).sum().float()
 
+        logging.info(
+            "True: {}, Positive: {}, TP: {}".format(
+                edge_true, edge_positive, edge_true_positive
+            )
+        )
+
         eff = edge_true_positive / edge_true
         pur = edge_true_positive / max(edge_positive, 1)
 
-        if (
-            (eff > 0.99)
-            and (pur > 0.99)
-            and not self.hparams["posted_alert"]
-            and self.hparams["slack_alert"]
-        ):
-            self.logger.experiment.alert(
-                title="High Performance",
-                text="Efficiency and purity have both cracked 99%. Great job, Dan! You're having a great Thursday, and I think you've earned a celebratory beer.",
-                wait_duration=timedelta(minutes=60),
-            )
-            self.hparams["posted_alert"] = True
 
         current_lr = self.optimizers().param_groups[0]["lr"]
         self.log_dict(
@@ -235,6 +180,7 @@ class GNNBase(LightningModule):
             "true_positive": (truth.bool() & preds).float().cpu().numpy(),
             "true": truth.float().cpu().numpy(),
             "positive": preds.float().cpu().numpy(),
+            "preds": preds.float().cpu().numpy()
         }
 
     def validation_step(self, batch, batch_idx):

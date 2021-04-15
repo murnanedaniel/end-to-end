@@ -20,29 +20,33 @@ import trackml.dataset
 # Locals
 # from datasets.graph import Graph, save_graphs
 
+
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser('prepare.py')
+    parser = argparse.ArgumentParser("prepare.py")
     add_arg = parser.add_argument
-    add_arg('config', nargs='?', default='configs/prepare_trackml.yaml')
-    add_arg('--n-workers', type=int, default=1)
-    add_arg('--task', type=int, default=0)
-    add_arg('--n-tasks', type=int, default=1)
-    add_arg('-v', '--verbose', action='store_true')
-    add_arg('--show-config', action='store_true')
-    add_arg('--interactive', action='store_true')
+    add_arg("config", nargs="?", default="configs/prepare_trackml.yaml")
+    add_arg("--n-workers", type=int, default=1)
+    add_arg("--task", type=int, default=0)
+    add_arg("--n-tasks", type=int, default=1)
+    add_arg("-v", "--verbose", action="store_true")
+    add_arg("--show-config", action="store_true")
+    add_arg("--interactive", action="store_true")
     return parser.parse_args()
+
 
 def calc_dphi(phi1, phi2):
     """Computes phi2-phi1 given in range [-pi,pi]"""
     dphi = phi2 - phi1
-    dphi[dphi > np.pi] -= 2*np.pi
-    dphi[dphi < -np.pi] += 2*np.pi
+    dphi[dphi > np.pi] -= 2 * np.pi
+    dphi[dphi < -np.pi] += 2 * np.pi
     return dphi
+
 
 def calc_eta(r, z):
     theta = np.arctan2(r, z)
-    return -1. * np.log(np.tan(theta / 2.))
+    return -1.0 * np.log(np.tan(theta / 2.0))
+
 
 def select_segments(hits1, hits2, phi_slope_max, z0_max):
     """
@@ -54,9 +58,12 @@ def select_segments(hits1, hits2, phi_slope_max, z0_max):
     DataFrame hit label-indices in hits1 and hits2, respectively.
     """
     # Start with all possible pairs of hits
-    keys = ['evtid', 'r', 'phi', 'z']
-    hit_pairs = hits1[keys].reset_index().merge(
-        hits2[keys].reset_index(), on='evtid', suffixes=('_1', '_2'))
+    keys = ["evtid", "r", "phi", "z"]
+    hit_pairs = (
+        hits1[keys]
+        .reset_index()
+        .merge(hits2[keys].reset_index(), on="evtid", suffixes=("_1", "_2"))
+    )
     # Compute line through the points
     dphi = calc_dphi(hit_pairs.phi_1, hit_pairs.phi_2)
     dz = hit_pairs.z_2 - hit_pairs.z_1
@@ -65,15 +72,16 @@ def select_segments(hits1, hits2, phi_slope_max, z0_max):
     z0 = hit_pairs.z_1 - hit_pairs.r_1 * dz / dr
     # Filter segments according to criteria
     good_seg_mask = (phi_slope.abs() < phi_slope_max) & (z0.abs() < z0_max)
-    return hit_pairs[['index_1', 'index_2']][good_seg_mask]
+    return hit_pairs[["index_1", "index_2"]][good_seg_mask]
 
-def construct_graph(hits, layer_pairs,
-                    phi_slope_max, z0_max,
-                    feature_names, feature_scale):
+
+def construct_graph(
+    hits, layer_pairs, phi_slope_max, z0_max, feature_names, feature_scale
+):
     """Construct one graph (e.g. from one event)"""
 
     # Loop over layer pairs and construct segments
-    layer_groups = hits.groupby('layer')
+    layer_groups = hits.groupby("layer")
     segments = []
     for (layer1, layer2) in layer_pairs:
         # Find and join all hit pairs
@@ -83,7 +91,7 @@ def construct_graph(hits, layer_pairs,
         # If an event has no hits on a layer, we get a KeyError.
         # In that case we just skip to the next layer pair
         except KeyError as e:
-            logging.info('skipping empty layer: %s' % e)
+            logging.info("skipping empty layer: %s" % e)
             continue
         # Construct the segments
         segments.append(select_segments(hits1, hits2, phi_slope_max, z0_max))
@@ -97,7 +105,7 @@ def construct_graph(hits, layer_pairs,
     Ri = np.zeros((n_hits, n_edges), dtype=np.uint8)
     Ro = np.zeros((n_hits, n_edges), dtype=np.uint8)
     y = np.zeros(n_edges, dtype=np.float32)
-    I = hits['hit_id']
+    I = hits["hit_id"]
 
     # We have the segments' hits given by dataframe label,
     # so we need to translate into positional indices.
@@ -114,65 +122,130 @@ def construct_graph(hits, layer_pairs,
     # Fill the segment labels
     pid1 = hits.particle_id.loc[segments.index_1].values
     pid2 = hits.particle_id.loc[segments.index_2].values
-    y[:] = (pid1 == pid2)
+    y[:] = pid1 == pid2
     # Return a tuple of the results
     return Graph(X, Ri, Ro, y), I
 
+
 def select_hits(hits, truth, particles, pt_min=0, noise=False):
     # Barrel volume and layer ids
-    vlids = [(7, 2), (7, 4), (7, 6), (7, 8), (7, 10), (7, 12), (7, 14), (8, 2), (8, 4), (8, 6), (8, 8), (9, 2), (9, 4), (9, 6), (9, 8), (9, 10), (9, 12), (9, 14), (12, 2), (12, 4), (12, 6), (12, 8), (12, 10), (12, 12), (13, 2), (13, 4), (13, 6), (13, 8), (14, 2), (14, 4), (14, 6), (14, 8), (14, 10), (14, 12), (16, 2), (16, 4), (16, 6), (16, 8), (16, 10), (16, 12), (17, 2), (17, 4), (18, 2), (18, 4), (18, 6), (18, 8), (18, 10), (18, 12)]
+    vlids = [
+        (7, 2),
+        (7, 4),
+        (7, 6),
+        (7, 8),
+        (7, 10),
+        (7, 12),
+        (7, 14),
+        (8, 2),
+        (8, 4),
+        (8, 6),
+        (8, 8),
+        (9, 2),
+        (9, 4),
+        (9, 6),
+        (9, 8),
+        (9, 10),
+        (9, 12),
+        (9, 14),
+        (12, 2),
+        (12, 4),
+        (12, 6),
+        (12, 8),
+        (12, 10),
+        (12, 12),
+        (13, 2),
+        (13, 4),
+        (13, 6),
+        (13, 8),
+        (14, 2),
+        (14, 4),
+        (14, 6),
+        (14, 8),
+        (14, 10),
+        (14, 12),
+        (16, 2),
+        (16, 4),
+        (16, 6),
+        (16, 8),
+        (16, 10),
+        (16, 12),
+        (17, 2),
+        (17, 4),
+        (18, 2),
+        (18, 4),
+        (18, 6),
+        (18, 8),
+        (18, 10),
+        (18, 12),
+    ]
     n_det_layers = len(vlids)
     # Select barrel layers and assign convenient layer number [0-9]
-    vlid_groups = hits.groupby(['volume_id', 'layer_id'])
-    hits = pd.concat([vlid_groups.get_group(vlids[i]).assign(layer=i)
-                      for i in range(n_det_layers)])
+    vlid_groups = hits.groupby(["volume_id", "layer_id"])
+    hits = pd.concat(
+        [vlid_groups.get_group(vlids[i]).assign(layer=i) for i in range(n_det_layers)]
+    )
     if noise is False:
         # Calculate particle transverse momentum
-        pt = np.sqrt(particles.px**2 + particles.py**2)
+        pt = np.sqrt(particles.px ** 2 + particles.py ** 2)
         # Applies pt cut, removes noise hits
         particles = particles[pt > pt_min]
-        truth = (truth[['hit_id', 'particle_id']]
-                 .merge(particles[['particle_id']], on='particle_id'))
+        truth = truth[["hit_id", "particle_id"]].merge(
+            particles[["particle_id"]], on="particle_id"
+        )
     else:
         # Calculate particle transverse momentum
-        pt = np.sqrt(truth.tpx**2 + truth.tpy**2)
+        pt = np.sqrt(truth.tpx ** 2 + truth.tpy ** 2)
         # Applies pt cut
         truth = truth[pt > pt_min]
-        truth.loc[truth['particle_id'] == 0,'particle_id'] = float('NaN')
+        truth.loc[truth["particle_id"] == 0, "particle_id"] = float("NaN")
     # Calculate derived hits variables
-    r = np.sqrt(hits.x**2 + hits.y**2)
+    r = np.sqrt(hits.x ** 2 + hits.y ** 2)
     phi = np.arctan2(hits.y, hits.x)
     # Select the data columns we need
-    hits = (hits[['hit_id', 'z', 'layer']]
-            .assign(r=r, phi=phi)
-            .merge(truth[['hit_id', 'particle_id']], on='hit_id'))
+    hits = (
+        hits[["hit_id", "z", "layer"]]
+        .assign(r=r, phi=phi)
+        .merge(truth[["hit_id", "particle_id"]], on="hit_id")
+    )
     # (DON'T) Remove duplicate hits
-#     hits = hits.loc[
-#         hits.groupby(['particle_id', 'layer'], as_index=False).r.idxmin()
-#     ]
+    #     hits = hits.loc[
+    #         hits.groupby(['particle_id', 'layer'], as_index=False).r.idxmin()
+    #     ]
     return hits
 
-def process_event(prefix, output_dir, pt_min, n_eta_sections, n_phi_sections,
-                  eta_range, phi_range, phi_slope_max, z0_max):
+
+def process_event(
+    prefix,
+    output_dir,
+    pt_min,
+    n_eta_sections,
+    n_phi_sections,
+    eta_range,
+    phi_range,
+    phi_slope_max,
+    z0_max,
+):
     # Load the data
     evtid = int(prefix[-9:])
-    logging.info('Event %i, loading data' % evtid)
+    logging.info("Event %i, loading data" % evtid)
     hits, particles, truth = trackml.dataset.load_event(
-        prefix, parts=['hits', 'particles', 'truth'])
+        prefix, parts=["hits", "particles", "truth"]
+    )
 
     # Apply hit selection
-    logging.info('Event %i, selecting hits' % evtid)
+    logging.info("Event %i, selecting hits" % evtid)
     hits = select_hits(hits, truth, particles, pt_min=pt_min).assign(evtid=evtid)
 
     # Divide detector into sections
-    #phi_range = (-np.pi, np.pi)
-    phi_edges = np.linspace(*phi_range, num=n_phi_sections+1)
-    eta_edges = np.linspace(*eta_range, num=n_eta_sections+1)
+    # phi_range = (-np.pi, np.pi)
+    phi_edges = np.linspace(*phi_range, num=n_phi_sections + 1)
+    eta_edges = np.linspace(*eta_range, num=n_eta_sections + 1)
     hits_sections = split_detector_sections(hits, phi_edges, eta_edges)
 
     # Graph features and scale
-    feature_names = ['r', 'phi', 'z']
-    feature_scale = np.array([1000., np.pi / n_phi_sections, 1000.])
+    feature_names = ["r", "phi", "z"]
+    feature_scale = np.array([1000.0, np.pi / n_phi_sections, 1000.0])
 
     # Define adjacent layers
     n_det_layers = 10
@@ -180,28 +253,39 @@ def process_event(prefix, output_dir, pt_min, n_eta_sections, n_phi_sections,
     layer_pairs = np.stack([l[:-1], l[1:]], axis=1)
 
     # Construct the graph
-    logging.info('Event %i, constructing graphs' % evtid)
-    graphs_all = [construct_graph(section_hits, layer_pairs=layer_pairs,
-                              phi_slope_max=phi_slope_max, z0_max=z0_max,
-                              feature_names=feature_names,
-                              feature_scale=feature_scale)
-              for section_hits in hits_sections]
+    logging.info("Event %i, constructing graphs" % evtid)
+    graphs_all = [
+        construct_graph(
+            section_hits,
+            layer_pairs=layer_pairs,
+            phi_slope_max=phi_slope_max,
+            z0_max=z0_max,
+            feature_names=feature_names,
+            feature_scale=feature_scale,
+        )
+        for section_hits in hits_sections
+    ]
     graphs = [x[0] for x in graphs_all]
-    IDs    = [x[1] for x in graphs_all]
+    IDs = [x[1] for x in graphs_all]
 
     # Write these graphs to the output directory
     try:
         base_prefix = os.path.basename(prefix)
-        filenames = [os.path.join(output_dir, '%s_g%03i' % (base_prefix, i))
-                     for i in range(len(graphs))]
-        filenames_ID = [os.path.join(output_dir, '%s_g%03i_ID' % (base_prefix, i))
-                     for i in range(len(graphs))]
+        filenames = [
+            os.path.join(output_dir, "%s_g%03i" % (base_prefix, i))
+            for i in range(len(graphs))
+        ]
+        filenames_ID = [
+            os.path.join(output_dir, "%s_g%03i_ID" % (base_prefix, i))
+            for i in range(len(graphs))
+        ]
     except Exception as e:
         logging.info(e)
-    logging.info('Event %i, writing graphs', evtid)
+    logging.info("Event %i, writing graphs", evtid)
     save_graphs(graphs, filenames)
     for ID, file_name in zip(IDs, filenames_ID):
         np.savez(file_name, ID=ID)
+
 
 def main():
     """Main function"""
@@ -210,52 +294,61 @@ def main():
     args = parse_args()
 
     # Setup logging
-    log_format = '%(asctime)s %(levelname)s %(message)s'
+    log_format = "%(asctime)s %(levelname)s %(message)s"
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format=log_format)
-    logging.info('Initializing')
+    logging.info("Initializing")
     if args.show_config:
-        logging.info('Command line config: %s' % args)
+        logging.info("Command line config: %s" % args)
 
     # Load configuration
     with open(args.config) as f:
         config = yaml.load(f)
     if args.task == 0:
-        logging.info('Configuration: %s' % config)
+        logging.info("Configuration: %s" % config)
 
     # Construct layer pairs from adjacent layer numbers
     layers = np.arange(10)
     layer_pairs = np.stack([layers[:-1], layers[1:]], axis=1)
 
     # Find the input files
-    input_dir = config['input_dir']
+    input_dir = config["input_dir"]
     all_files = os.listdir(input_dir)
-    suffix = '-hits.csv'
-    file_prefixes = sorted(os.path.join(input_dir, f.replace(suffix, ''))
-                           for f in all_files if f.endswith(suffix))
-    file_prefixes = file_prefixes[:config['n_files']]
+    suffix = "-hits.csv"
+    file_prefixes = sorted(
+        os.path.join(input_dir, f.replace(suffix, ""))
+        for f in all_files
+        if f.endswith(suffix)
+    )
+    file_prefixes = file_prefixes[: config["n_files"]]
 
     # Split the input files by number of tasks and select my chunk only
     file_prefixes = np.array_split(file_prefixes, args.n_tasks)[args.task]
 
     # Prepare output
-    output_dir = os.path.expandvars(config['output_dir'])
+    output_dir = os.path.expandvars(config["output_dir"])
     os.makedirs(output_dir, exist_ok=True)
-    logging.info('Writing outputs to ' + output_dir)
+    logging.info("Writing outputs to " + output_dir)
 
     # Process input files with a worker pool
     with mp.Pool(processes=args.n_workers) as pool:
-        process_func = partial(process_event, output_dir=output_dir,
-                               phi_range=(-np.pi, np.pi), **config['selection'])
+        process_func = partial(
+            process_event,
+            output_dir=output_dir,
+            phi_range=(-np.pi, np.pi),
+            **config["selection"]
+        )
         pool.map(process_func, file_prefixes)
 
     # Drop to IPython interactive shell
     if args.interactive:
-        logging.info('Starting IPython interactive session')
+        logging.info("Starting IPython interactive session")
         import IPython
+
         IPython.embed()
 
-    logging.info('All done!')
+    logging.info("All done!")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

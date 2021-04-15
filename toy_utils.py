@@ -20,13 +20,16 @@ from torch_geometric.data import Data
 from sklearn.cluster import DBSCAN
 from sklearn import metrics
 import scipy as sp
+
 # from apex import amp, optimizers
 
 # Locals
 from torch_geometric.data import Batch
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-sys.path.append('..')
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+sys.path.append("..")
 import faiss
+
 res = faiss.StandardGpuResources()
 from trainers import build_edges
 
@@ -34,127 +37,203 @@ sig = torch.nn.Sigmoid()
 
 # Metrics
 
-def evaluate_embfilter_f1(test_loader, model, r_min, r_max, r_step, t_min, t_max, t_step):
+
+def evaluate_embfilter_f1(
+    test_loader, model, r_min, r_max, r_step, t_min, t_max, t_step
+):
     model.eval()
 
-    total_true_positive, total_positive, total_true = np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step)))), np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step)))), np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step))))
+    total_true_positive, total_positive, total_true = (
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+    )
 
     for batch in test_loader:
 
         data = batch.to(device)
-        pred, spatial, e = model(data) 
+        pred, spatial, e = model(data)
         reference = spatial.index_select(0, e[1])
         neighbors = spatial.index_select(0, e[0])
-        d = torch.sqrt(torch.sum((reference - neighbors)**2, dim=-1))
+        d = torch.sqrt(torch.sum((reference - neighbors) ** 2, dim=-1))
 
-        for i, r in enumerate(np.arange(r_min, r_max, r_step)):  
-    #         print(i)
-            r_pred = pred[d<r]
-            r_e = e[:,d<r]
+        for i, r in enumerate(np.arange(r_min, r_max, r_step)):
+            #         print(i)
+            r_pred = pred[d < r]
+            r_e = e[:, d < r]
 
             y = batch.pid[r_e[0]] == batch.pid[r_e[1]]
 
-            true = 2*len(batch.true_edges)
+            true = 2 * len(batch.true_edges)
             edge_true, edge_false = y.float() > 0.5, y.float() < 0.5
-            for j, t in enumerate(np.arange(t_min, t_max, t_step)):  
+            for j, t in enumerate(np.arange(t_min, t_max, t_step)):
                 edge_positive, edge_negative = sig(r_pred) > t, sig(r_pred) < t
                 total_true_positive[i][j] += (edge_true & edge_positive).sum().item()
                 total_true[i][j] += true
                 total_positive[i][j] += edge_positive.sum().item()
 
     pur, eff = total_true_positive / total_positive, total_true_positive / total_true
-    f1 = 2*pur*eff/(pur+eff) 
+    f1 = 2 * pur * eff / (pur + eff)
     return pur, eff, f1
 
-def evaluate_biembagnn_f1(test_loader, model, r_min, r_max, r_step, t_min, t_max, t_step):
+
+def evaluate_biembagnn_f1(
+    test_loader, model, r_min, r_max, r_step, t_min, t_max, t_step
+):
     model.eval()
 
-    total_true_positive, total_positive, total_true = np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step)))), np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step)))), np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step))))
+    total_true_positive, total_positive, total_true = (
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+    )
 
     for batch in test_loader:
 
         data = batch.to(device)
-        pred, spatial, e, _ = model(data) 
+        pred, spatial, e, _ = model(data)
         reference = spatial.index_select(0, e[1])
         neighbors = spatial.index_select(0, e[0])
-        d = torch.sqrt(torch.sum((reference - neighbors)**2, dim=-1))
+        d = torch.sqrt(torch.sum((reference - neighbors) ** 2, dim=-1))
 
-        for i, r in enumerate(np.arange(r_min, r_max, r_step)):  
-    #         print(i)
-            r_pred = pred[d<r]
-            r_e = e[:,d<r]
+        for i, r in enumerate(np.arange(r_min, r_max, r_step)):
+            #         print(i)
+            r_pred = pred[d < r]
+            r_e = e[:, d < r]
 
             y = batch.pid[r_e[0]] == batch.pid[r_e[1]]
 
-            true = 2*len(batch.true_edges)
+            true = 2 * len(batch.true_edges)
             edge_true, edge_false = y.float() > 0.5, y.float() < 0.5
-            for j, t in enumerate(np.arange(t_min, t_max, t_step)):  
+            for j, t in enumerate(np.arange(t_min, t_max, t_step)):
                 edge_positive, edge_negative = sig(r_pred) > t, sig(r_pred) < t
                 total_true_positive[i][j] += (edge_true & edge_positive).sum().item()
                 total_true[i][j] += true
                 total_positive[i][j] += edge_positive.sum().item()
 
     pur, eff = total_true_positive / total_positive, total_true_positive / total_true
-    f1 = 2*pur*eff/(pur+eff) 
+    f1 = 2 * pur * eff / (pur + eff)
     return pur, eff, f1
+
 
 def evaluate_embagnn_f1(test_loader, model, r_min, r_max, r_step, t_min, t_max, t_step):
     model.eval()
 
-    total_true_positive, total_positive, total_true = np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step)))), np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step)))), np.zeros((int(np.ceil((r_max - r_min)/r_step)), int(np.ceil((t_max - t_min)/t_step))))
+    total_true_positive, total_positive, total_true = (
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+        np.zeros(
+            (
+                int(np.ceil((r_max - r_min) / r_step)),
+                int(np.ceil((t_max - t_min) / t_step)),
+            )
+        ),
+    )
 
     for batch in test_loader:
 
         data = batch.to(device)
-        pred, spatial, e, _ = model(data) 
+        pred, spatial, e, _ = model(data)
         reference = spatial.index_select(0, e[1])
         neighbors = spatial.index_select(0, e[0])
-        d = torch.sqrt(torch.sum((reference - neighbors)**2, dim=-1))
+        d = torch.sqrt(torch.sum((reference - neighbors) ** 2, dim=-1))
 
-        for i, r in enumerate(np.arange(r_min, r_max, r_step)):  
-    #         print(i)
-            r_pred = pred[d<r]
-            r_e = e[:,d<r]
+        for i, r in enumerate(np.arange(r_min, r_max, r_step)):
+            #         print(i)
+            r_pred = pred[d < r]
+            r_e = e[:, d < r]
 
             y = batch.pid[r_e[0]] == batch.pid[r_e[1]]
 
             true = len(batch.true_edges)
             edge_true, edge_false = y.float() > 0.5, y.float() < 0.5
-            for j, t in enumerate(np.arange(t_min, t_max, t_step)):  
+            for j, t in enumerate(np.arange(t_min, t_max, t_step)):
                 edge_positive, edge_negative = sig(r_pred) > t, sig(r_pred) < t
                 total_true_positive[i][j] += (edge_true & edge_positive).sum().item()
                 total_true[i][j] += true
                 total_positive[i][j] += edge_positive.sum().item()
 
     pur, eff = total_true_positive / total_positive, total_true_positive / total_true
-    f1 = 2*pur*eff/(pur+eff) 
+    f1 = 2 * pur * eff / (pur + eff)
     return pur, eff, f1
 
+
 def evaluate_embedding_f1(test_loader, model, r_min, r_max, r_step):
-    
+
     model.eval()
-    
-    total_true_positive, total_positive, total_true = np.zeros(int(np.ceil((r_max - r_min)/r_step)), dtype=np.float), np.zeros(int(np.ceil((r_max - r_min)/r_step)), dtype=np.float), np.zeros(int(np.ceil((r_max - r_min)/r_step)), dtype=np.float)
+
+    total_true_positive, total_positive, total_true = (
+        np.zeros(int(np.ceil((r_max - r_min) / r_step)), dtype=np.float),
+        np.zeros(int(np.ceil((r_max - r_min) / r_step)), dtype=np.float),
+        np.zeros(int(np.ceil((r_max - r_min) / r_step)), dtype=np.float),
+    )
 
     for batch in test_loader:
 
         data = batch.to(device)
         spatial = model(data.x)
 
-        for i, r in enumerate(np.arange(r_min, r_max, r_step)):    
-    #         e = radius_graph(emb_feats, r=r, batch=batch.batch, loop=False, max_num_neighbors=5000)
+        for i, r in enumerate(np.arange(r_min, r_max, r_step)):
+            #         e = radius_graph(emb_feats, r=r, batch=batch.batch, loop=False, max_num_neighbors=5000)
 
             e_spatial = build_edges(spatial, r, 100, res)
-            e_adjacent = e_spatial[:, ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]]) == 1) | ((batch.layers[e_spatial[0]] - batch.layers[e_spatial[1]]) == 1)]
+            e_adjacent = e_spatial[
+                :,
+                ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]]) == 1)
+                | ((batch.layers[e_spatial[0]] - batch.layers[e_spatial[1]]) == 1),
+            ]
 
             reference = spatial.index_select(0, e_adjacent[1])
             neighbors = spatial.index_select(0, e_adjacent[0])
 
-            d = torch.sum((reference - neighbors)**2, dim=-1)
+            d = torch.sum((reference - neighbors) ** 2, dim=-1)
 
-            y = (batch.pid[e_spatial[0]] == batch.pid[e_spatial[1]]) & ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]] == 1) | (batch.layers[e_spatial[0]] - batch.layers[e_spatial[1]] == 1))
+            y = (batch.pid[e_spatial[0]] == batch.pid[e_spatial[1]]) & (
+                (batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]] == 1)
+                | (batch.layers[e_spatial[0]] - batch.layers[e_spatial[1]] == 1)
+            )
 
-            true = 2*len(batch.true_edges)
+            true = 2 * len(batch.true_edges)
             true_positive = (y.float()).sum().item()
             positive = len(e_adjacent[0])
 
@@ -163,21 +242,25 @@ def evaluate_embedding_f1(test_loader, model, r_min, r_max, r_step):
             total_true_positive[i] += true_positive
 
     pur, eff = total_true_positive / total_positive, total_true_positive / total_true
-    f1 = 2*pur*eff/(pur+eff)
+    f1 = 2 * pur * eff / (pur + eff)
     return pur, eff, f1
 
+
 def evaluate_embedding_vmeasure(test_loader, model, e_min, e_max, e_step):
-    
+
     model.eval()
 
-    homogeneity, completeness = np.zeros(int(np.ceil((e_max - e_min)/e_step)), dtype=np.float), np.zeros(int(np.ceil((e_max - e_min)/e_step)), dtype=np.float)
+    homogeneity, completeness = (
+        np.zeros(int(np.ceil((e_max - e_min) / e_step)), dtype=np.float),
+        np.zeros(int(np.ceil((e_max - e_min) / e_step)), dtype=np.float),
+    )
 
     for batch in test_loader:
 
         data = batch.to(device)
         spatial = model(data.x)
 
-        for i, e in enumerate(np.arange(e_min, e_max, e_step)):    
+        for i, e in enumerate(np.arange(e_min, e_max, e_step)):
 
             embedded = spatial.cpu().detach().numpy()
             db = DBSCAN(eps=e, min_samples=1).fit(embedded)
@@ -187,112 +270,161 @@ def evaluate_embedding_vmeasure(test_loader, model, e_min, e_max, e_step):
             homogeneity[i] += metrics.homogeneity_score(labels_true, labels)
             completeness[i] += metrics.completeness_score(labels_true, labels)
     #         print("Hom:", homogeneity[i], "Comp:", completeness[i])
-    homogeneity = homogeneity/len(test_loader.dataset)
-    completeness = completeness/len(test_loader.dataset)
-    
+    homogeneity = homogeneity / len(test_loader.dataset)
+    completeness = completeness / len(test_loader.dataset)
+
     return homogeneity, completeness
+
 
 @torch.no_grad()
 def classify_event(model, batch, r, adjacent=False):
     model.eval()
     data = batch.to(device)
     spatial = model(data.x)
-        
+
     e_spatial = build_edges(spatial, r, 100, res)
-    
+
     if adjacent:
-        e_spatial = e_spatial[:, ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]]) == 1) | ((batch.layers[e_spatial[0]] - batch.layers[e_spatial[1]]) == 1)]
-        e_spatial = remove_duplicate_edges(data.x.cpu().numpy(), e_adjacent.cpu().numpy()).astype(int)
-    
-    data = Data(x = data.x, emb = spatial, pid = data.pid, e = torch.from_numpy(e_spatial))
+        e_spatial = e_spatial[
+            :,
+            ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]]) == 1)
+            | ((batch.layers[e_spatial[0]] - batch.layers[e_spatial[1]]) == 1),
+        ]
+        e_spatial = remove_duplicate_edges(
+            data.x.cpu().numpy(), e_adjacent.cpu().numpy()
+        ).astype(int)
+
+    data = Data(x=data.x, emb=spatial, pid=data.pid, e=torch.from_numpy(e_spatial))
     return data
+
 
 @torch.no_grad()
 def classify_gnn_event(model, batch, r):
     model.eval()
     data = batch.to(device)
-    
+
     spatial = model(data.x)
-        
+
     e_spatial = build_edges(spatial, r, 100, res)
-    e_adjacent = e_spatial[:, ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]]) == 1)]
-    
-    e_adjacent = remove_duplicate_edges(data.x.cpu().numpy(), e_adjacent.cpu().numpy()).astype(int)
+    e_adjacent = e_spatial[
+        :, ((batch.layers[e_spatial[1]] - batch.layers[e_spatial[0]]) == 1)
+    ]
+
+    e_adjacent = remove_duplicate_edges(
+        data.x.cpu().numpy(), e_adjacent.cpu().numpy()
+    ).astype(int)
     y = batch.pid[e_adjacent[0]] == batch.pid[e_adjacent[1]]
-    
-    data = Data(x = data.x.cpu(), y = y.float().cpu(), emb = spatial, pid = data.pid.cpu(), e = torch.from_numpy(e_adjacent), layers = data.layers.cpu(), true_edges = data.true_edges.cpu())
+
+    data = Data(
+        x=data.x.cpu(),
+        y=y.float().cpu(),
+        emb=spatial,
+        pid=data.pid.cpu(),
+        e=torch.from_numpy(e_adjacent),
+        layers=data.layers.cpu(),
+        true_edges=data.true_edges.cpu(),
+    )
     return data
+
 
 # Model handling
 
-def save_model(epoch, model, optimizer, scheduler, running_loss, config, PATH):
-    torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'loss': running_loss,
-                'config': config
-                }, os.path.join('/global/cscratch1/sd/danieltm/ExaTrkX/model_comparisons/', PATH))
 
-def save_model_from_script(epoch, model, optimizer, scheduler, running_loss, config, PATH):
-    torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'loss': running_loss,
-                'config': config
-                }, os.path.join('model_comparisons/', PATH))
-    
+def save_model(epoch, model, optimizer, scheduler, running_loss, config, PATH):
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "loss": running_loss,
+            "config": config,
+        },
+        os.path.join("/global/cscratch1/sd/danieltm/ExaTrkX/model_comparisons/", PATH),
+    )
+
+
+def save_model_from_script(
+    epoch, model, optimizer, scheduler, running_loss, config, PATH
+):
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "loss": running_loss,
+            "config": config,
+        },
+        os.path.join("model_comparisons/", PATH),
+    )
+
+
 def save_mixed_model(epoch, model, optimizer, scheduler, running_loss, config, PATH):
-    torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'amp': amp.state_dict(),
-                'loss': running_loss,
-                'config': config
-                }, os.path.join('../model_comparisons/', PATH))
-    
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "amp": amp.state_dict(),
+            "loss": running_loss,
+            "config": config,
+        },
+        os.path.join("../model_comparisons/", PATH),
+    )
+
+
 def remove_duplicate_edges(X, e):
-    
+
     # Re-introduce layer/directionality information using the r-direction
-    r_mask = X[e[0,:],0] > X[e[1,:],0]
-    e[0,r_mask], e[1,r_mask] = e[1,r_mask], e[0,r_mask]
-    
+    r_mask = X[e[0, :], 0] > X[e[1, :], 0]
+    e[0, r_mask], e[1, r_mask] = e[1, r_mask], e[0, r_mask]
+
     # Use cupy sparse matrices to remove duplicates
-    e_sparse = sp.sparse.coo_matrix(([1]*e.shape[1], e))
+    e_sparse = sp.sparse.coo_matrix(([1] * e.shape[1], e))
     e_sparse.sum_duplicates()
-    
+
     # There are some self-edges, for some reason. This step may become unnecessary once bug is solved
     e_sparse.setdiag(0)
     e_sparse.eliminate_zeros()
-    
+
     # Reshape as numpy array
     e = np.vstack([e_sparse.row, e_sparse.col])
-    
+
     return e
 
+
 def graph_intersection(pred_graph, truth_graph):
-    array_size = max(pred_graph.max().item(), truth_graph.max().item()) + 1  
-    
+    array_size = max(pred_graph.max().item(), truth_graph.max().item()) + 1
+
     l1 = pred_graph.cpu().numpy()
     l2 = truth_graph.cpu().numpy()
-    e_1 = sp.sparse.coo_matrix((np.ones(l1.shape[1]), l1), shape=(array_size, array_size)).tocsr()
-    e_2 = sp.sparse.coo_matrix((np.ones(l2.shape[1]), l2), shape=(array_size, array_size)).tocsr()
-    e_intersection = (e_1.multiply(e_2) - ((e_1 - e_2)>0)).tocoo()
+    e_1 = sp.sparse.coo_matrix(
+        (np.ones(l1.shape[1]), l1), shape=(array_size, array_size)
+    ).tocsr()
+    e_2 = sp.sparse.coo_matrix(
+        (np.ones(l2.shape[1]), l2), shape=(array_size, array_size)
+    ).tocsr()
+    e_intersection = (e_1.multiply(e_2) - ((e_1 - e_2) > 0)).tocoo()
 
-    new_pred_graph = torch.from_numpy(np.vstack([e_intersection.row, e_intersection.col])).long().to(device)
+    new_pred_graph = (
+        torch.from_numpy(np.vstack([e_intersection.row, e_intersection.col]))
+        .long()
+        .to(device)
+    )
     y = e_intersection.data > 0
-    
+
     return new_pred_graph, y
-    
-def make_mlp(input_size, sizes,
-             hidden_activation='ReLU',
-             output_activation='ReLU',
-             layer_norm=False):
+
+
+def make_mlp(
+    input_size,
+    sizes,
+    hidden_activation="ReLU",
+    output_activation="ReLU",
+    layer_norm=False,
+):
     """Construct an MLP with specified fully-connected layers."""
     hidden_activation = getattr(nn, hidden_activation)
     if output_activation is not None:
@@ -301,10 +433,10 @@ def make_mlp(input_size, sizes,
     n_layers = len(sizes)
     sizes = [input_size] + sizes
     # Hidden layers
-    for i in range(n_layers-1):
-        layers.append(nn.Linear(sizes[i], sizes[i+1]))
+    for i in range(n_layers - 1):
+        layers.append(nn.Linear(sizes[i], sizes[i + 1]))
         if layer_norm:
-            layers.append(nn.LayerNorm(sizes[i+1]))
+            layers.append(nn.LayerNorm(sizes[i + 1]))
         layers.append(hidden_activation())
     # Final layer
     layers.append(nn.Linear(sizes[-2], sizes[-1]))
@@ -314,7 +446,8 @@ def make_mlp(input_size, sizes,
         layers.append(output_activation())
     return nn.Sequential(*layers)
 
-#__________________________ Vanilla Edge Classifaction Network _____________
+
+# __________________________ Vanilla Edge Classifaction Network _____________
 
 
 class EdgeNetwork(nn.Module):
@@ -324,14 +457,18 @@ class EdgeNetwork(nn.Module):
     and applies some fully-connected network layers with a final
     sigmoid activation.
     """
-    def __init__(self, input_dim, hidden_dim=8, hidden_activation=nn.Tanh,
-                 layer_norm=True):
+
+    def __init__(
+        self, input_dim, hidden_dim=8, hidden_activation=nn.Tanh, layer_norm=True
+    ):
         super(EdgeNetwork, self).__init__()
-        self.network = make_mlp(input_dim*2,
-                                [hidden_dim, hidden_dim, hidden_dim, 1],
-                                hidden_activation=hidden_activation,
-                                output_activation=None,
-                                layer_norm=layer_norm)
+        self.network = make_mlp(
+            input_dim * 2,
+            [hidden_dim, hidden_dim, hidden_dim, 1],
+            hidden_activation=hidden_activation,
+            output_activation=None,
+            layer_norm=layer_norm,
+        )
 
     def forward(self, x, edge_index):
         # Select the features of the associated nodes
@@ -339,6 +476,7 @@ class EdgeNetwork(nn.Module):
         x1, x2 = x[start], x[end]
         edge_inputs = torch.cat([x[start], x[end]], dim=1)
         return self.network(edge_inputs).squeeze(-1)
+
 
 class NodeNetwork(nn.Module):
     """
@@ -348,13 +486,23 @@ class NodeNetwork(nn.Module):
     them with the node's previous features in a fully-connected
     network to compute the new features.
     """
-    def __init__(self, input_dim, hidden_dim, output_dim, hidden_activation=nn.Tanh,
-                 layer_norm=True):
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        hidden_activation=nn.Tanh,
+        layer_norm=True,
+    ):
         super(NodeNetwork, self).__init__()
-        self.network = make_mlp(input_dim*3, [hidden_dim, hidden_dim, hidden_dim, output_dim],
-                                hidden_activation=hidden_activation,
-                                output_activation=hidden_activation,
-                                layer_norm=layer_norm)
+        self.network = make_mlp(
+            input_dim * 3,
+            [hidden_dim, hidden_dim, hidden_dim, output_dim],
+            hidden_activation=hidden_activation,
+            output_activation=hidden_activation,
+            layer_norm=layer_norm,
+        )
 
     def forward(self, x, e, edge_index):
         start, end = edge_index
@@ -370,20 +518,36 @@ class Edge_Class_Net(nn.Module):
     Segment classification graph neural network model.
     Consists of an input network, an edge network, and a node network.
     """
-    def __init__(self, input_dim=3, hidden_dim=8, n_graph_iters=3,
-                 hidden_activation=nn.Tanh, layer_norm=True):
+
+    def __init__(
+        self,
+        input_dim=3,
+        hidden_dim=8,
+        n_graph_iters=3,
+        hidden_activation=nn.Tanh,
+        layer_norm=True,
+    ):
         super(Edge_Class_Net, self).__init__()
         self.n_graph_iters = n_graph_iters
         # Setup the input network
-        self.input_network = make_mlp(input_dim, [hidden_dim],
-                                      output_activation=hidden_activation,
-                                      layer_norm=layer_norm)
+        self.input_network = make_mlp(
+            input_dim,
+            [hidden_dim],
+            output_activation=hidden_activation,
+            layer_norm=layer_norm,
+        )
         # Setup the edge network
-        self.edge_network = EdgeNetwork(input_dim+hidden_dim, hidden_dim,
-                                        hidden_activation, layer_norm=layer_norm)
+        self.edge_network = EdgeNetwork(
+            input_dim + hidden_dim, hidden_dim, hidden_activation, layer_norm=layer_norm
+        )
         # Setup the node layers
-        self.node_network = NodeNetwork(input_dim+hidden_dim, hidden_dim, hidden_dim,
-                                        hidden_activation, layer_norm=layer_norm)
+        self.node_network = NodeNetwork(
+            input_dim + hidden_dim,
+            hidden_dim,
+            hidden_dim,
+            hidden_activation,
+            layer_norm=layer_norm,
+        )
 
     def forward(self, inputs):
         """Apply forward pass of the model"""
@@ -401,9 +565,11 @@ class Edge_Class_Net(nn.Module):
             x = torch.cat([x, inputs.x], dim=-1)
         # Apply final edge network
         return self.edge_network(x, inputs.edge_index)
-    
-#_______________ Vanilla Track Counter ________________________
-    
+
+
+# _______________ Vanilla Track Counter ________________________
+
+
 class Out_Net(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(Out_Net, self).__init__()
@@ -415,22 +581,40 @@ class Out_Net(nn.Module):
         x = F.relu(x)
         x = self.lin1(x.float())
         x = F.relu(x)
-        
+
         return x
 
 
 class Net(torch.nn.Module):
     def __init__(self, dataset):
         super(Net, self).__init__()
-        self.lin = nn.Sequential(torch.nn.Linear(64, 64),  nn.ReLU(), torch.nn.Linear(64, 64),  nn.ReLU(), torch.nn.Linear(64, 64),  nn.ReLU(), torch.nn.Linear(64, 64),  nn.ReLU())
-        self.linout = nn.Sequential(torch.nn.Linear(8, 8),  nn.ReLU(), torch.nn.Linear(8, 8),  nn.ReLU(), torch.nn.Linear(8, 8),  nn.ReLU(), torch.nn.Linear(8, 8),  nn.ReLU())
-#         self.conv1 = GCNConv(2, 16)
-#         self.conv2 = GCNConv(16, 64)
-#         self.conv3 = GCNConv(64, 64)
-        self.input = nn.Sequential(torch.nn.Linear(2, 64),nn.ReLU())
+        self.lin = nn.Sequential(
+            torch.nn.Linear(64, 64),
+            nn.ReLU(),
+            torch.nn.Linear(64, 64),
+            nn.ReLU(),
+            torch.nn.Linear(64, 64),
+            nn.ReLU(),
+            torch.nn.Linear(64, 64),
+            nn.ReLU(),
+        )
+        self.linout = nn.Sequential(
+            torch.nn.Linear(8, 8),
+            nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            nn.ReLU(),
+        )
+        #         self.conv1 = GCNConv(2, 16)
+        #         self.conv2 = GCNConv(16, 64)
+        #         self.conv3 = GCNConv(64, 64)
+        self.input = nn.Sequential(torch.nn.Linear(2, 64), nn.ReLU())
         self.conv1 = tnn.HypergraphConv(64, 64, use_attention=True)
         self.conv2 = tnn.HypergraphConv(64, 64, use_attention=True)
-#         self.conv2 = tnn.nn.Linear(64, 64)
+        #         self.conv2 = tnn.nn.Linear(64, 64)
         self.out = Out_Net(64, 12)
 
     def forward(self, data):
@@ -455,13 +639,13 @@ class Net(torch.nn.Module):
         x = self.conv2(x.float(), edge_index)
         x = F.relu(x)
         x = self.out(x, batch)
-#         x = F.relu(x)
-#         x = self.linout(x.float())
-#         return torch.sigmoid(x)
+        #         x = F.relu(x)
+        #         x = self.linout(x.float())
+        #         return torch.sigmoid(x)
         return x
-    
 
-#__________________________ Combined Edge + Counter Classifaction Network _____________
+
+# __________________________ Combined Edge + Counter Classifaction Network _____________
 
 
 # class EdgeNetwork(nn.Module):
@@ -522,29 +706,43 @@ class Net(torch.nn.Module):
 #         x = self.lin2(x.float())
 #         x = F.relu(x)
 #         x = self.lin1(x.float())
-        
+
 #         return x
+
 
 class Edge_Graph_Class_Net(nn.Module):
     """
     Segment classification graph neural network model.
     Consists of an input network, an edge network, and a node network.
     """
-    def __init__(self, input_dim=3, hidden_dim=8, n_graph_iters=3,
-                 output_dim = 8, hidden_activation=nn.Tanh, layer_norm=True):
+
+    def __init__(
+        self,
+        input_dim=3,
+        hidden_dim=8,
+        n_graph_iters=3,
+        output_dim=8,
+        hidden_activation=nn.Tanh,
+        layer_norm=True,
+    ):
         super(Edge_Graph_Class_Net, self).__init__()
         self.n_graph_iters = n_graph_iters
         # Setup the input network
-        self.input_network = make_mlp(input_dim, [hidden_dim],
-                                      output_activation=hidden_activation,
-                                      layer_norm=layer_norm)
+        self.input_network = make_mlp(
+            input_dim,
+            [hidden_dim],
+            output_activation=hidden_activation,
+            layer_norm=layer_norm,
+        )
         # Setup the edge network
-        self.edge_network = EdgeNetwork(input_dim+hidden_dim, hidden_dim,
-                                        hidden_activation, layer_norm=layer_norm)
+        self.edge_network = EdgeNetwork(
+            input_dim + hidden_dim, hidden_dim, hidden_activation, layer_norm=layer_norm
+        )
         # Setup the node layers
-        self.node_network = NodeNetwork(input_dim+hidden_dim, hidden_dim,
-                                        hidden_activation, layer_norm=layer_norm)
-        self.out_network = Out_Net(input_dim+hidden_dim, output_dim)
+        self.node_network = NodeNetwork(
+            input_dim + hidden_dim, hidden_dim, hidden_activation, layer_norm=layer_norm
+        )
+        self.out_network = Out_Net(input_dim + hidden_dim, output_dim)
 
     def forward(self, inputs):
         """Apply forward pass of the model"""
@@ -563,9 +761,9 @@ class Edge_Graph_Class_Net(nn.Module):
         # Apply final edge network
         o = self.out_network(x, inputs.batch)
         return self.edge_network(x, inputs.edge_index), o
-    
-    
-#__________________ Combined Edge & Track Param Classifier ___________
+
+
+# __________________ Combined Edge & Track Param Classifier ___________
 
 
 class Edge_Track_Net(nn.Module):
@@ -573,24 +771,40 @@ class Edge_Track_Net(nn.Module):
     Segment classification graph neural network model.
     Consists of an input network, an edge network, and a node network.
     """
-    def __init__(self, input_dim=3, hidden_dim=8, n_graph_iters=3,
-                 output_dim=3, hidden_activation=nn.Tanh, layer_norm=True):
+
+    def __init__(
+        self,
+        input_dim=3,
+        hidden_dim=8,
+        n_graph_iters=3,
+        output_dim=3,
+        hidden_activation=nn.Tanh,
+        layer_norm=True,
+    ):
         super(Edge_Track_Net, self).__init__()
         self.n_graph_iters = n_graph_iters
         # Setup the input network
-        self.input_network = make_mlp(input_dim, [hidden_dim],
-                                      output_activation=hidden_activation,
-                                      layer_norm=layer_norm)
+        self.input_network = make_mlp(
+            input_dim,
+            [hidden_dim],
+            output_activation=hidden_activation,
+            layer_norm=layer_norm,
+        )
         # Setup the edge network
-        self.edge_network = EdgeNetwork(input_dim+hidden_dim, hidden_dim,
-                                        hidden_activation, layer_norm=layer_norm)
+        self.edge_network = EdgeNetwork(
+            input_dim + hidden_dim, hidden_dim, hidden_activation, layer_norm=layer_norm
+        )
         # Setup the node layers
-        self.node_network = NodeNetwork(input_dim+hidden_dim, hidden_dim,
-                                        hidden_activation, layer_norm=False)
-        
-        self.output_network = make_mlp(input_dim+hidden_dim, [hidden_dim, output_dim],
-                                      output_activation=hidden_activation,
-                                      layer_norm=False)
+        self.node_network = NodeNetwork(
+            input_dim + hidden_dim, hidden_dim, hidden_activation, layer_norm=False
+        )
+
+        self.output_network = make_mlp(
+            input_dim + hidden_dim,
+            [hidden_dim, output_dim],
+            output_activation=hidden_activation,
+            layer_norm=False,
+        )
 
     def forward(self, inputs):
         """Apply forward pass of the model"""
@@ -608,11 +822,10 @@ class Edge_Track_Net(nn.Module):
             x = torch.cat([x, inputs.x], dim=-1)
         # Apply final edge network
         return self.edge_network(x, inputs.edge_index), self.output_network(x)
-    
 
 
-#___________________________________________________________________
-    
+# ___________________________________________________________________
+
 # class GCNConv(MessagePassing):
 #     def __init__(self, in_channels, out_channels):
 #         super(GCNConv, self).__init__(aggr='add')  # "Add" aggregation.
@@ -656,7 +869,6 @@ class Edge_Track_Net(nn.Module):
 #     def forward(self, x, batch):
 #         x = scatter_mean(x, batch, dim=0)
 #         x = self.lin(x.float())
-        
 
 
 # class Net(torch.nn.Module):
@@ -675,4 +887,3 @@ class Edge_Track_Net(nn.Module):
 #         print(x)
 # #         return F.log_softmax(x, dim=1)
 #         return F.sigmoid(x)
-    
