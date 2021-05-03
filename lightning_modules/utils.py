@@ -287,12 +287,14 @@ def build_knn(spatial, k):
 
     if device == "cuda":
         res = faiss.StandardGpuResources()
-        _, I = faiss.knn_gpu(res, spatial, spatial, k_max)
+        _, I = faiss.knn_gpu(res, spatial, spatial, k)
     elif device == "cpu":
         index = faiss.IndexFlatL2(spatial.shape[1])
         index.add(spatial)
-        _, I = index.search(spatial, k_max)
+        _, I = index.search(spatial, k)
 
+    print(spatial)
+    print(I)
     ind = torch.Tensor.repeat(
         torch.arange(I.shape[0], device=device), (I.shape[1], 1), 1
     ).T

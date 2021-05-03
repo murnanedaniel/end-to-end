@@ -29,6 +29,7 @@ class LayerlessEmbedding(AugmentedEmbeddingBase):
             hparams["in_channels"],
             [hparams["emb_hidden"]] * hparams["nb_layer"] + [hparams["emb_dim"]],
             hidden_activation="Tanh",
+            output_activation=None,
             layer_norm=True,
         )
 
