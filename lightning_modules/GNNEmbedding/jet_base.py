@@ -317,9 +317,7 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
 
     def get_subgraph(self, batch):
 
-        if (
-            "subgraph" in self.hparams["regime"]
-        ):  # and batch.sub_edge_index.sum() > 1000:
+        if "subgraph" in self.hparams["regime"]:  # and batch.sub_edge_index.sum() > 1000:
 
             if batch.sub_edge_index[0].dtype == "bool":
                 subgraph = batch.edge_index[:, batch.sub_edge_index[0]]
@@ -351,7 +349,7 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
     def get_connected_pairs(self, subgraph, walk_length=None):
 
         if walk_length is None:
-            walk_length = self.hparams["n_graph_iters"]
+            walk_length = self.hparams["n_graph_iters"] if self.hparams["n_graph_iters"] > 0 else 1
 
         graph_np = subgraph.cpu().numpy()
         graph_coo = sp.coo_matrix(
@@ -464,16 +462,12 @@ class JetGNNNodeEmbeddingBase(ToyGNNEmbeddingBase):
         subgraph = self.get_subgraph(batch)
 
         # DEBUGGING: What is the performance when only considering the local neighbourhood?
-
-        step_4_eff, step_4_pur = self.get_local_performance(
-            subgraph, batch, latent_space, k_radius, walk_length=4
+        local_steps = self.hparams["n_graph_iters"] if self.hparams["n_graph_iters"]>0 else 1
+        
+        local_eff, local_pur = self.get_local_performance(
+            subgraph, batch, latent_space, k_radius, walk_length=local_steps
         )
-        self.log_dict({"step_4_eff": step_4_eff, "step_4_pur": step_4_pur})
-
-        step_8_eff, step_8_pur = self.get_local_performance(
-            subgraph, batch, latent_space, k_radius, walk_length=8
-        )
-        self.log_dict({"step_8_eff": step_8_eff, "step_8_pur": step_8_pur})
+        self.log_dict({"local_eff": local_eff, "local_pur": local_pur})
 
         # REGULAR EVALUATION:
 

@@ -18,7 +18,7 @@ adjacent: False
 in_channels: 3
 hidden: 64
 emb_dim: 8
-n_graph_iters: 8
+n_graph_iters: 4
 nb_node_layer: 3
 nb_edge_layer: 3
 nb_emb_layer: 3
@@ -40,7 +40,7 @@ lr: 0.001
 factor: 0.3
 patience: 40
 regime: [pid, subgraph, global_inference, global_train]
-max_epochs: 100
+max_epochs: 50
 slack_alert: False
 
 # Post-processing
